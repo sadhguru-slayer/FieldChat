@@ -1,0 +1,30 @@
+# FastAPI
+fastapi
+uvicorn[standard]
+python-jose[cryptography]
+
+# Database
+sqlalchemy>=2.0
+alembic
+aiosqlite
+
+# Validation & Configuration
+pydantic-settings
+email-validator
+python-dotenv
+
+# Authentication
+pwdlib[argon2]
+PyJWT
+python-multipart
+
+# UUID v7
+uuid6
+
+# Device Detection
+user-agents
+ua-parser
+
+# DataBase
+psycopg
+asyncpg
