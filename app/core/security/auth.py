@@ -8,7 +8,7 @@ import hashlib
 from app.models.auth.refresh import RefreshToken
 from user_agents import parse
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v2.5/token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 
 class TokenManager:
@@ -16,6 +16,7 @@ class TokenManager:
     def __init__(self, secret_key: str, algorithm: str):
         self.secret_key = secret_key
         self.algorithm = algorithm
+
 
 
     def create_token(self, data: dict, expires_delta: timedelta) -> str:

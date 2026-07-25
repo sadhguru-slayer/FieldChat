@@ -4,3 +4,4 @@ class TokenResponse(BaseModel):
     access_token:str
     refresh_token:str
     type:str = "bearer"
+    

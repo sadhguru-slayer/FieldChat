@@ -61,8 +61,8 @@ async def register(user_data:UserRegister,db:DBSession):
 
     return user
 
-@router.post("/token")
-async def token(request:Request,db:DBSession,form_data:Annotated[OAuth2PasswordRequestForm,Depends()]):
+@router.post("/login")
+async def login(request:Request,db:DBSession,form_data:Annotated[OAuth2PasswordRequestForm,Depends()]):
     user = await user_service.get_user_with_email_or_username(db,form_data.username)
     if not user:
         raise HTTPException(404,"User not found")
@@ -80,3 +80,9 @@ async def token(request:Request,db:DBSession,form_data:Annotated[OAuth2PasswordR
         "token_type":"bearer"
     }
 
+@router.post("/logout")
+async def logout(db:DBSession,refresh_token:str):
+    payload = token_manager.decode_token(refresh_token)
+    if not payload or payload.get("type") != "refresh":
+        raise HTTPException(status_code=401,detail="Invalid token type")
+    await auth_service.revoke_refresh_token(db,refresh_token)

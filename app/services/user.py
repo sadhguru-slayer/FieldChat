@@ -5,6 +5,13 @@ from app.core.security.auth import token_manager
 from uuid import UUID
 class UserService:
     @classmethod
+    async def get_user_with_id(cls, db,user_id:str):
+        result= await db.execute(select(User).where(
+            User.id == UUID(user_id)
+        ))
+        return result.scalar_one_or_none()
+    
+    @classmethod
     async def get_user_with_email_or_username(cls, db,email_username:str):
         result= await db.execute(select(User).where(
             (User.email == email_username) | (User.username == email_username)

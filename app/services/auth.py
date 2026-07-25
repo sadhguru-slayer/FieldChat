@@ -1,5 +1,8 @@
 from datetime import datetime, timedelta
+from sqlalchemy import select
 from uuid6 import uuid7
+from fastapi import HTTPException
+from uuid import UUID
 from jose import jwt
 from app.config import settings
 import hashlib
@@ -36,5 +39,25 @@ class AuthService:
         db.add(refresh)
         await db.commit()
         return token
+    async def get_refresh_token(self,db,token_id:str):
+        stmp = select(RefreshToken).where(RefreshToken.id == UUID(token_id))
+        result = await db.execute(stmp)
+        token = result.scalar_one_or_none()
+        return token
+    async def get_refresh_token(self,db,token:str):
+        result = await db.execute(select(RefreshToken).where(RefreshToken.token_hash == self.hash_refresh_token(token)))
+        return result.scalar_one_or_none()
+
+    async def revoke_refresh_token(self,db,token:str):
+        refresh = await self.get_refresh_token(db,token)
+        if not refresh:
+            raise HTTPException(status_code=401,detail="Refresh token not found")
+        if refresh.revoked:
+            raise HTTPException(status_code=401,detail="Refresh token already revoked")
+        if refresh.expires_at < datetime.utcnow():
+            raise HTTPException(status_code=401,detail="Refresh token expired")
+        refresh.revoked=True
+        await db.commit()
+        return refresh
 
 auth_service = AuthService()
