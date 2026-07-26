@@ -62,6 +62,19 @@ class TokenManager:
         except JWTError:
             raise HTTPException(status_code=401, detail="Invalid token")
 
+    def verify_access_token(self,token: str):
+        payload = self.decode_token(token)
+        if not payload or payload.get("type") != "access":
+            return None
+        return payload
+
+
+    def verify_refresh_token(self,token: str):
+        payload = self.decode_token(token)
+        if not payload or payload.get("type") != "refresh":
+            return None
+        return payload
+
 
     def verify_token_type(self, payload: dict, expected_type: str) -> dict:
         if payload.get("type") != expected_type:

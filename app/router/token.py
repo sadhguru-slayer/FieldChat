@@ -1,6 +1,7 @@
 from fastapi import APIRouter,HTTPException
 from app.dependencies import DBSession
 from app.models.auth.refresh import RefreshToken
+from app.models.auth.user import User
 from sqlalchemy import select
 from uuid import UUID
 from app.services.user import user_service
@@ -16,6 +17,21 @@ async def get_all_refresh_rokens(db:DBSession):
     result = await db.execute(select(RefreshToken))
     tokens = result.scalars().all()
     return tokens
+
+@router.post('/refresh_token')
+async def refresh_token(db:DBSession,token:str):
+    payload = token_manager.verify_refresh_token(token)
+    payload = token_manager.verify_token_type(payload,"refresh")
+    if not payload:
+        raise HTTPException(status_code=401,detail="Token not valid")
+    user_id = payload.get("sub")
+    result = await db.execute(select(User).where(User.id == UUID(user_id)))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    access_token = token_manager.create_access_token(user_id)
+    return {"access_token":access_token}
+
 
 @router.get("/user_refresh_tokens/{user_id}")
 async def get_user_refresh_tokens(db:DBSession,user_id:str):

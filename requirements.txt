@@ -26,5 +26,9 @@ user-agents
 ua-parser
 
 # DataBase
-psycopg
+psycopg[binary]
 asyncpg
+
+# WS
+websockets
+redis

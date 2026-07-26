@@ -1,16 +1,77 @@
-version: '3.9'
-
 services:
   fastapi:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: chat-application
     ports:
       - "8000:8000"
+    depends_on:
+      alembic:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_started
+    restart: unless-stopped
     volumes:
       - .:/app
+    env_file:
+      - .env
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    mem_limit: 512m
+    mem_reservation: 256m
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  alembic:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chat-application-alembic
+    depends_on:
+      - postgres
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    command: alembic upgrade head
+    restart: "no"
+
+  redis:
+    image: redis:7-alpine
+    container_name: chat-application-redis
+
     restart: unless-stopped
+
     command: >
-      uvicorn app.main:app
-      --host 0.0.0.0
-      --port 8000
-      --reload
+      redis-server
+      --maxmemory 64mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+
+    mem_limit: 128m
+    mem_reservation: 64m
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: chat-application-postgres
+
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: chatuser
+      POSTGRES_PASSWORD: chatpassword
+      POSTGRES_DB: chatdb
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    mem_limit: 512m
+    mem_reservation: 256m
+
+volumes:
+  postgres_data:
