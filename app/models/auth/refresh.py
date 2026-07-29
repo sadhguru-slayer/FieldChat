@@ -31,6 +31,10 @@ class RefreshToken(UUIDMixin,Base):
     )
     expires_at :Mapped[datetime] = mapped_column(DateTime)
     revoked:Mapped[bool] = mapped_column(Boolean,default=False)
+    last_sync_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
     user:Mapped["User"] = relationship(
         back_populates="refresh_tokens"
     )

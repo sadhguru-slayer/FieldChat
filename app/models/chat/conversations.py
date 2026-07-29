@@ -5,8 +5,8 @@ from app.models.base import Base,UUIDMixin
 import enum
 
 class ConversationType(enum.Enum):
-    PERSONAL:"PERSONAL"
-    GROUP:"GROUP"
+    PERSONAL="PERSONAL"
+    GROUP="GROUP"
 
 class Conversation(UUIDMixin,Base):
     __tablename__ = "conversations"
@@ -18,4 +18,26 @@ class Conversation(UUIDMixin,Base):
     name:Mapped[str | None] = mapped_column(
         String(100),
         nullable=True
+    )
+    created_at :Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        defaul=lambda:datetime.now(timezone.utc),
+        index=True
+    )
+    is_deleted :Mapped[bool] = mapped_column(
+        Boolean,
+        default=False
+    )
+
+    # Relationships
+    participants = relationship(
+        "ConversationParticipant",
+        back_populates="conversation",
+        cascade="all, delete-orphan"
+    )
+
+    messages = relationship(
+        "Message",
+        back_populates="conversation",
+        cascade="all, delete-orphan"
     )
