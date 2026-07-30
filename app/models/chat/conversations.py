@@ -21,7 +21,7 @@ class Conversation(UUIDMixin,Base):
     )
     created_at :Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        defaul=lambda:datetime.now(timezone.utc),
+        default=lambda:datetime.now(timezone.utc),
         index=True
     )
     is_deleted :Mapped[bool] = mapped_column(
