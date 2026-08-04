@@ -4,5 +4,5 @@ from uuid import UUID
 
 class CreateConversation(BaseModel):
     conversation_name:str | None
-    participants : List[UUID] | None
+    participants : List[str | None]
 

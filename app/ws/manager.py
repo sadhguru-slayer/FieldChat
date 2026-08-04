@@ -53,6 +53,7 @@ class ConnectionManager:
 					"online":True,
 				})
 			)
+	
 	def _get_conv(self,user_id:str,ws:WebSocket):
 		for con in self.users.get(user_id,[]):
 			if con.ws == ws:
