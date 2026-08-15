@@ -55,3 +55,5 @@ class User(UUIDMixin,Base):
         back_populates="user",
         cascade="all, delete-orphan"
     )
+    def __str__(self) -> str:
+        return f"{self.username} ({self.email})"

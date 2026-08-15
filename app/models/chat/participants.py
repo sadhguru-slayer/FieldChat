@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy import String, DateTime, ForeignKey, Boolean, Enum
+from sqlalchemy import String, DateTime, ForeignKey, Boolean, Enum,UniqueConstraint
 from datetime import datetime,timezone
 from app.models.base import Base,UUIDMixin
 from .conversations import Conversation
@@ -11,17 +11,24 @@ class ParticipantRole(enum.Enum):
     OWNER="OWNER"
     MEMBER="MEMBER"
 
-class ConversationParticipant(Base):
+class ConversationParticipant(UUIDMixin,Base):
     __tablename__ = "conversation_participants"
+    __table_args__ = (
+        UniqueConstraint(
+            "conversation_id",
+            "user_id",
+            name="uq_conversation_participant",
+        ),
+    )
 
     conversation_id: Mapped[UUID] = mapped_column(
         ForeignKey("conversations.id", ondelete="CASCADE"),
-        primary_key=True
+        nullable=False,
     )
 
     user_id: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
-        primary_key=True
+        nullable=False,
     )
     
     role: Mapped[ParticipantRole] = mapped_column(
@@ -51,3 +58,5 @@ class ConversationParticipant(Base):
         "User",
         back_populates="conversations"
     )
+    def __str__(self) -> str:
+        return f"{self.user_id} — {self.conversation_id} ({self.role})"

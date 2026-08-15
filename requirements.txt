@@ -32,3 +32,6 @@ asyncpg
 # WS
 websockets
 redis
+
+# Admin panel
+fastadmin[fastapi,sqlalchemy]

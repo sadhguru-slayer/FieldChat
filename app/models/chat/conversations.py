@@ -41,3 +41,8 @@ class Conversation(UUIDMixin,Base):
         back_populates="conversation",
         cascade="all, delete-orphan"
     )
+
+    def __str__(self) -> str:
+        if self.name:
+            return self.name
+        return f"{self.type.value} - {self.id}"
