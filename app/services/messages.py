@@ -5,24 +5,689 @@ from datetime import timezone,datetime
 import json
 
 from sqlalchemy import select
+from sqlalchemy.orm import  selectinload
 
 from app.ws.manager import manager
 # from app.ws.events import WSMessageEvent
 
-from app.models.messages import Message,MessageDeleteState
+from app.models.chat.messages import Message,MessageDeleteState, MessageEvent, MessageReceipt, MessageType, MessageReaction
 
 
 from app.redis_client import r
+from app.redis.keys import RedisKeys
+from app.dependencies import DBSession
+from app.services.cache_management.conversation import conversation_cache 
+from app.schema.chat.message import MessageEventPayload
+from dataclasses import dataclass
+from typing import Generic, Optional, TypeVar
 
-from app.dependencies.db import db_session
+T = TypeVar("T")
+
+
+@dataclass
+class ServiceResult(Generic[T]):
+    success: bool
+    data: Optional[T] = None
+    error: Optional[str] = None
 
 class MessageService:
     def __init__(self, db):
         self.db = db
-    async def MessageCreate(self, user, data):
-        conversation_id = data.get("conversation_id")
 
-        if not conversation_id:
-            return
-        
-        pass
+    def _build_event(
+        self,
+        event: MessageEvent,
+        message_id,
+        conversation_id,
+        *,
+        sender_id=None,
+        user_id=None,
+        username=None,
+        message=None,
+        timestamp=None,
+        edited_at=None,
+        reply_to=None,
+        reaction=None,
+    old_reaction=None,
+    ):
+        return MessageEventPayload(
+            event=event,
+            message_id=str(message_id),
+            conversation_id=str(conversation_id),
+            sender_id=str(sender_id) if sender_id else None,
+            user_id=str(user_id) if user_id else None,
+            username=username,
+            message=message,
+            timestamp=(
+                timestamp.astimezone(timezone.utc).isoformat()
+                if timestamp
+                else None
+            ),
+            edited_at=(
+                edited_at.astimezone(timezone.utc).isoformat()
+                if edited_at
+                else None
+            ),
+            reply_to=reply_to,
+            reaction=reaction,
+        old_reaction=old_reaction,
+        )
+
+    async def _get_reply_preview(self, message_id, user_id):
+        stmt = (
+            select(Message)
+            .options(selectinload(Message.sender))
+            .where(Message.id == message_id)
+        )
+
+        message = await self.db.scalar(stmt)
+
+        if not message:
+            return None
+
+        if message.is_deleted_global:
+            return {
+                "message_id": str(message.id),
+                "sender_id": str(message.sender_id),
+                "username": message.sender.username if message.sender else None,
+                "message": "Deleted for everyone",
+                "timestamp": (
+                    message.timestamp.astimezone(timezone.utc).isoformat()
+                    if message.timestamp
+                    else None
+                ),
+                "type": message.type.value,
+                "is_deleted": True,
+            }
+
+        return {
+            "message_id": str(message.id),
+            "sender_id": (
+                str(message.sender_id)
+                if message.type != MessageType.SYSTEM
+                else "SYSTEM"
+            ),
+            "username": (
+                message.sender.username
+                if message.sender and message.type != MessageType.SYSTEM
+                else "SYSTEM"
+            ),
+            "message": message.message,
+            "timestamp": (
+                message.timestamp.astimezone(timezone.utc).isoformat()
+                if message.timestamp
+                else None
+            ),
+            "type": message.type.value,
+            "is_deleted": False,
+        }
+
+
+    async def create_message(
+        self,
+        user,
+        conversation_id,
+        content,
+        reply_to_message_id=None,
+    ):
+        if not await conversation_cache.is_member(
+            str(conversation_id),
+            str(user.id),
+        ):
+            return ServiceResult(
+                success=False,
+                error="NOT_CONVERSATION_MEMBER",
+            )
+
+        content = content.strip()
+
+        if not content:
+            return ServiceResult(
+                success=False,
+                error="EMPTY_MESSAGE",
+            )
+
+        reply_to = None
+
+        if reply_to_message_id:
+            stmt = (
+                select(Message)
+                .options(selectinload(Message.sender))
+                .where(
+                    Message.id == reply_to_message_id,
+                    Message.conversation_id == conversation_id,
+                )
+            )
+
+            reply_to = await self.db.scalar(stmt)
+
+            if not reply_to:
+                return ServiceResult(
+                    success=False,
+                    error="REPLY_MESSAGE_NOT_FOUND",
+                )
+
+        db_message = Message(
+            conversation_id=conversation_id,
+            sender_id=user.id,
+            message=content,
+            reply_to_message_id=reply_to.id if reply_to else None,
+        )
+
+        self.db.add(db_message)
+        await self.db.commit()
+        await self.db.refresh(db_message)
+
+        reply_preview = None
+
+        if reply_to:
+            reply_preview = {
+                "message_id": str(reply_to.id),
+                "sender_id": (
+                    str(reply_to.sender_id)
+                    if reply_to.type != MessageType.SYSTEM
+                    else "SYSTEM"
+                ),
+                "username": (
+                    reply_to.sender.username
+                    if reply_to.sender and reply_to.type != MessageType.SYSTEM
+                    else "SYSTEM"
+                ),
+                "message": (
+                    "Deleted for everyone"
+                    if reply_to.is_deleted_global
+                    else reply_to.message
+                ),
+                "timestamp": (
+                    reply_to.timestamp.astimezone(timezone.utc).isoformat()
+                    if reply_to.timestamp
+                    else None
+                ),
+                "type": reply_to.type.value,
+                "is_deleted": reply_to.is_deleted_global,
+            }
+
+        event_payload = self._build_event(
+            MessageEvent.MESSAGE_CREATED,
+            db_message.id,
+            conversation_id,
+            sender_id=user.id,
+            username=user.username,
+            message=content,
+            timestamp=db_message.timestamp,
+            reply_to=reply_preview,
+        )
+
+        await r.publish(
+            RedisKeys.conversation_key(str(conversation_id)),
+            event_payload.model_dump_json(),
+        )
+
+        return ServiceResult(
+            success=True,
+            data=event_payload,
+        )
+
+
+    async def edit_message(
+        self,
+        user,
+        conversation_id,
+        message_id,
+        content,
+    ):
+        if not await conversation_cache.is_member(
+            str(conversation_id),
+            str(user.id),
+        ):
+            return ServiceResult(
+                success=False,
+                error="NOT_CONVERSATION_MEMBER",
+            )
+
+        if not content or not content.strip():
+            return ServiceResult(
+                success=False,
+                error="EMPTY_MESSAGE",
+            )
+
+        stmt = select(Message).where(
+            Message.id == message_id,
+            Message.conversation_id == conversation_id,
+        )
+
+        result = await self.db.execute(stmt)
+        message = result.scalar_one_or_none()
+
+        if not message:
+            return ServiceResult(
+                success=False,
+                error="MESSAGE_NOT_FOUND",
+            )
+
+        if message.sender_id != user.id:
+            return ServiceResult(
+                success=False,
+                error="NOT_MESSAGE_OWNER",
+            )
+
+        if message.is_deleted_global:
+            return ServiceResult(
+                success=False,
+                error="MESSAGE_DELETED",
+            )
+
+        message.message = content.strip()
+        message.edited_at = datetime.now(timezone.utc)
+
+        await self.db.commit()
+        await self.db.refresh(message)
+
+        event_payload = self._build_event(
+            MessageEvent.MESSAGE_EDITED,
+            message.id,
+            conversation_id,
+            sender_id=user.id,
+            username=user.username,
+            message=content,
+            timestamp=message.timestamp,
+            edited_at=message.edited_at,
+        )
+        await r.publish(
+            f"conversation:{conversation_id}",
+            event_payload.model_dump_json(),
+        )   
+
+        return ServiceResult(
+            success=True,
+            data=event_payload,
+        )
+
+    async def message_deleted_for_everyone(
+        self,
+        user,
+        conversation_id,
+        message_id,
+    ):
+        if not conversation_id or not message_id:
+            return ServiceResult(
+                success=False,
+                error="NOT_ENOUGH_PARAMETERS",
+            )
+
+        if not await conversation_cache.is_member(
+            str(conversation_id),
+            str(user.id),
+        ):
+            return ServiceResult(
+                success=False,
+                error="NOT_CONVERSATION_MEMBER",
+            )
+
+        stmt = select(Message).where(
+            Message.id == message_id,
+            Message.conversation_id == conversation_id,
+        )
+
+        result = await self.db.execute(stmt)
+        message = result.scalar_one_or_none()
+
+        if not message:
+            return ServiceResult(
+                success=False,
+                error="MESSAGE_NOT_FOUND",
+            )
+
+        # Get participant role
+        role_stmt = select(ConversationParticipant.role).where(
+            ConversationParticipant.user_id == user.id,
+            ConversationParticipant.conversation_id == conversation_id,
+        )
+
+        role_result = await self.db.execute(role_stmt)
+        participant_role = role_result.scalar_one_or_none()
+
+        # Only sender, admin, or owner can delete for everyone
+        if (
+            message.sender_id != user.id
+            and participant_role not in (
+                ParticipantRole.ADMIN,
+                ParticipantRole.OWNER,
+            )
+        ):
+            return ServiceResult(
+                success=False,
+                error="NOT_ALLOWED_TO_DELETE_FOR_EVERYONE",
+            )
+
+        if message.is_deleted_global:
+            return ServiceResult(
+                success=False,
+                error="MESSAGE_ALREADY_DELETED",
+            )
+
+        message.is_deleted_global = True
+
+        await self.db.commit()
+        await self.db.refresh(message)
+
+        event_payload = self._build_event(
+            MessageEvent.MESSAGE_DELETED_FOR_EVERYONE,
+            message.id,
+            conversation_id,
+            sender_id=message.sender_id,
+            message="Deleted for everyone",
+            timestamp=message.timestamp,
+        )
+
+        await r.publish(
+            RedisKeys.conversation_key(str(conversation_id)),
+            event_payload.model_dump_json(),
+        )
+
+        return ServiceResult(
+            success=True,
+            data=event_payload,
+        )
+
+    async def message_delete_for_me(
+        self,
+        user,
+        conversation_id,
+        message_id,
+    ):
+        if not conversation_id or not message_id:
+            return ServiceResult(
+                success=False,
+                error="NOT_ENOUGH_PARAMETERS",
+            )
+
+        if not await conversation_cache.is_member(
+            str(conversation_id),
+            str(user.id),
+        ):
+            return ServiceResult(
+                success=False,
+                error="NOT_CONVERSATION_MEMBER",
+            )
+
+        stmt = select(Message).where(
+            Message.id == message_id,
+            Message.conversation_id == conversation_id,
+        )
+
+        result = await self.db.execute(stmt)
+        message = result.scalar_one_or_none()
+
+        if not message:
+            return ServiceResult(
+                success=False,
+                error="MESSAGE_NOT_FOUND",
+            )
+
+        stmt = select(MessageDeleteState).where(
+            MessageDeleteState.message_id == message_id,
+            MessageDeleteState.user_id == user.id,
+        )
+
+        existing = (
+            await self.db.execute(stmt)
+        ).scalar_one_or_none()
+
+        if existing:
+            return ServiceResult(
+                success=False,
+                error="MESSAGE_ALREADY_DELETED",
+            )
+
+        delete_state = MessageDeleteState(
+            message_id=message.id,
+            user_id=user.id,
+        )
+
+        self.db.add(delete_state)
+        await self.db.commit()
+
+        event_payload = self._build_event(
+            MessageEvent.MESSAGE_DELETED_FOR_ME,
+            message.id,
+            conversation_id,
+            user_id=user.id,
+        )
+
+        await r.publish(
+            f"user:{user.id}",
+            event_payload.model_dump_json(),
+        )
+
+        return ServiceResult(
+            success=True,
+            data=event_payload,
+        )
+
+    async def mark_delivered(
+        self,
+        user,
+        message_id,
+    ):
+        stmt = select(Message).where(
+            Message.id == message_id,
+        )
+
+        result = await self.db.execute(stmt)
+        message = result.scalar_one_or_none()
+
+        if not message:
+            return ServiceResult(
+                success=False,
+                error="MESSAGE_NOT_FOUND",
+            )
+
+        if message.sender_id == user.id:
+            return ServiceResult(
+                success=False,
+                error="CANNOT_RECEIPT_OWN_MESSAGE",
+            )
+
+        # Don't create duplicate receipt
+        stmt = select(MessageReceipt).where(
+            MessageReceipt.message_id == message.id,
+            MessageReceipt.user_id == user.id,
+        )
+
+        receipt = (
+            await self.db.execute(stmt)
+        ).scalar_one_or_none()
+
+        if not receipt:
+            receipt = MessageReceipt(
+                message_id=message.id,
+                user_id=user.id,
+                delivered_at=datetime.now(timezone.utc),
+            )
+            self.db.add(receipt)
+
+        elif receipt.delivered_at is None:
+            receipt.delivered_at = datetime.now(timezone.utc)
+
+        else:
+            return ServiceResult(
+                success=True,
+                data=None,
+            )
+
+        await self.db.commit()
+
+        return ServiceResult(
+            success=True,
+            data=receipt,
+        )
+
+    async def mark_read(
+        self,
+        user,
+        message_id,
+    ):
+        stmt = select(Message).where(
+            Message.id == message_id,
+        )
+
+        result = await self.db.execute(stmt)
+        message = result.scalar_one_or_none()
+
+        if not message:
+            return ServiceResult(
+                success=False,
+                error="MESSAGE_NOT_FOUND",
+            )
+
+        if message.sender_id == user.id:
+            return ServiceResult(
+                success=False,
+                error="CANNOT_RECEIPT_OWN_MESSAGE",
+            )
+
+        stmt = select(MessageReceipt).where(
+            MessageReceipt.message_id == message.id,
+            MessageReceipt.user_id == user.id,
+        )
+
+        receipt = (
+            await self.db.execute(stmt)
+        ).scalar_one_or_none()
+
+        now = datetime.now(timezone.utc)
+
+        if not receipt:
+            receipt = MessageReceipt(
+                message_id=message.id,
+                user_id=user.id,
+                delivered_at=now,
+                read_at=now,
+            )
+            self.db.add(receipt)
+
+        else:
+            if receipt.read_at is not None:
+                return ServiceResult(
+                    success=True,
+                    data=None,
+                )
+
+            if receipt.delivered_at is None:
+                receipt.delivered_at = now
+
+            receipt.read_at = now
+
+        await self.db.commit()
+
+        return ServiceResult(
+            success=True,
+            data=receipt,
+        )
+
+    async def add_reaction(self, user, conversation_id, message_id, reaction):
+        if not await conversation_cache.is_member(str(conversation_id), str(user.id)):
+            return ServiceResult(success=False, error="NOT_CONVERSATION_MEMBER")
+
+        reaction = reaction.strip()
+        if not reaction:
+            return ServiceResult(success=False, error="EMPTY_REACTION")
+        if len(reaction) > 32:
+            return ServiceResult(success=False, error="REACTION_TOO_LONG")
+
+        message = await self.db.scalar(
+            select(Message).where(
+                Message.id == message_id,
+                Message.conversation_id == conversation_id,
+            )
+        )
+        if not message:
+            return ServiceResult(success=False, error="MESSAGE_NOT_FOUND")
+        if message.is_deleted_global:
+            return ServiceResult(success=False, error="MESSAGE_DELETED")
+
+        existing = await self.db.scalar(
+            select(MessageReaction).where(
+                MessageReaction.message_id == message_id,
+                MessageReaction.user_id == user.id,
+            )
+        )
+
+        if existing and existing.reaction == reaction:
+            return ServiceResult(success=True, data=None)
+
+        if existing:
+            existing.reaction = reaction
+            existing.created_at = datetime.now(timezone.utc)
+        else:
+            existing = MessageReaction(
+                message_id=message.id,
+                user_id=user.id,
+                reaction=reaction,
+            )
+            self.db.add(existing)
+
+        await self.db.commit()
+        await self.db.refresh(existing)
+
+        event_payload = self._build_event(
+            MessageEvent.MESSAGE_REACTION_ADDED,
+            message.id,
+            conversation_id,
+            user_id=user.id,
+            reaction=reaction,
+        )
+
+        await r.publish(
+            RedisKeys.conversation_key(str(conversation_id)),
+            event_payload.model_dump_json(),
+        )
+
+        print(event_payload)
+
+        return ServiceResult(success=True, data=event_payload)
+
+
+    async def remove_reaction(self, user, conversation_id, message_id):
+        if not await conversation_cache.is_member(str(conversation_id), str(user.id)):
+            return ServiceResult(success=False, error="NOT_CONVERSATION_MEMBER")
+
+        message = await self.db.scalar(
+            select(Message).where(
+                Message.id == message_id,
+                Message.conversation_id == conversation_id,
+            )
+        )
+        if not message:
+            return ServiceResult(success=False, error="MESSAGE_NOT_FOUND")
+
+        existing = await self.db.scalar(
+            select(MessageReaction).where(
+                MessageReaction.message_id == message_id,
+                MessageReaction.user_id == user.id,
+            )
+        )
+        if not existing:
+            return ServiceResult(success=False, error="REACTION_NOT_FOUND")
+
+        reaction = existing.reaction
+        await self.db.delete(existing)
+        await self.db.commit()
+
+        event_payload = self._build_event(
+            MessageEvent.MESSAGE_REACTION_REMOVED,
+            message.id,
+            conversation_id,
+            user_id=user.id,
+            reaction=reaction,
+        )
+
+        await r.publish(
+            RedisKeys.conversation_key(str(conversation_id)),
+            event_payload.model_dump_json(),
+        )
+
+
+        return ServiceResult(success=True, data=event_payload)
+

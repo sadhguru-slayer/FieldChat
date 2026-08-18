@@ -1,6 +1,6 @@
-from sqlalchemy import Text, ForeignKey, DateTime, Enum, Index, Boolean, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column, relationship
-
+from sqlalchemy import Text, ForeignKey, DateTime, Enum, Index, Boolean, UniqueConstraint, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
+from sqlalchemy import select, and_, exists
 from datetime import datetime, timezone
 from app.models.base import Base,UUIDMixin
 import enum
@@ -11,6 +11,8 @@ class WSMessageEvent(str, enum.Enum):
     MESSAGE_EDITED = "message.edited"
     MESSAGE_DELETED_FOR_ME = "message.deleted_for_me"
     MESSAGE_DELETED_FOR_EVERYONE = "message.deleted_for_everyone"
+    MESSAGE_REACTION_ADDED = "message.reaction_added"
+    MESSAGE_REACTION_REMOVED = "message.reaction_removed"
     ONLINE_USERS = "online_users"
     ERROR = "error"
 
@@ -19,6 +21,8 @@ class MessageEvent(str, enum.Enum):
     MESSAGE_EDITED = "message.edited"
     MESSAGE_DELETED_FOR_ME = "message.deleted_for_me"
     MESSAGE_DELETED_FOR_EVERYONE = "message.deleted_for_everyone"
+    MESSAGE_REACTION_ADDED = "message.reaction_added"
+    MESSAGE_REACTION_REMOVED = "message.reaction_removed"
     ONLINE_USERS = "online_users"
     ERROR = "error"
 
@@ -37,6 +41,11 @@ class Message(UUIDMixin,Base):
     sender_id: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         index=True
+    )
+    reply_to_message_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("messages.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
 
     type: Mapped[MessageType] = mapped_column(
@@ -62,6 +71,17 @@ class Message(UUIDMixin,Base):
         "User",
         back_populates="messages"
     )
+    reply_to = relationship(
+        "Message",
+        remote_side="Message.id",
+        back_populates="replies",
+    )
+
+    replies = relationship(
+        "Message",
+        back_populates="reply_to",
+    )
+
     delete_states = relationship(
         "MessageDeleteState",
         cascade="all, delete-orphan"
@@ -72,6 +92,12 @@ class Message(UUIDMixin,Base):
         back_populates="message",
         cascade="all, delete-orphan"
     )
+    reactions = relationship(
+        "MessageReaction",
+        back_populates="message",
+        cascade="all, delete-orphan"
+    )
+
 
     __table_args__ = (
         Index(
@@ -169,3 +195,50 @@ class MessageReceipt(UUIDMixin,Base):
             status = "Sent"
 
         return f"{status}: {self.message_id} / {self.user_id}"
+
+class MessageReaction(UUIDMixin, Base):
+    __tablename__ = "message_reactions"
+
+    message_id: Mapped[UUID] = mapped_column(
+        ForeignKey("messages.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    reaction: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    message = relationship(
+        "Message",
+        back_populates="reactions"
+    )
+
+    user = relationship("User")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "message_id",
+            "user_id",
+            "reaction",
+            name="uq_message_reaction",
+        ),
+        Index(
+            "ix_message_reactions_message",
+            "message_id",
+        ),
+    )
+
+    def __str__(self) -> str:
+        return f"{self.reaction}: {self.message_id} / {self.user_id}"

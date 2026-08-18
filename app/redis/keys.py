@@ -15,8 +15,12 @@ class RedisKeys:
     """ 
         ==============
         Conversations
-        ==============
+        ==============    
     """
+    @staticmethod
+    def conversation_key(conversation_id:str):
+        return f"conversation:{conversation_id}"
+
     # To get the user's conversation
     @staticmethod
     def user_conversations(user_id:str)->str:

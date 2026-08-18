@@ -60,13 +60,13 @@ class ConnectionManager:
 				return con
 		return None
 
-	async def join_conversation(self,coversation_id:str,user_id:str,ws:WebSocket):
+	async def join_conversation(self,conversation_id:str,user_id:str,ws:WebSocket):
 		con = self._get_conv(user_id,ws)
 		if not con:
 			return
 
-		con.joined_conversation.add(user_id)
-		self.local_conversations[coversation_id].add(user_id)
+		con.joined_conversation.add(conversation_id)
+		self.local_conversations[conversation_id].add(user_id)
 
 	def get_local_members(self,conversation_id:str):
 		return self.local_conversations.get(conversation_id,set())
@@ -86,7 +86,7 @@ class ConnectionManager:
 		self.users[user_id] = remaining
 		# If no connections in users mapped to user_id then remove it from the memory
 		if not self.users[user_id]:
-			self.users.pop[user_id,None]
+			self.users.pop(user_id,None)
 
 		if not disconnected:
 			return
@@ -138,10 +138,11 @@ class ConnectionManager:
 
 		for con in dead:
 			try:
-				self.users[user_id].remove()
-				await r.srem(f"user:{user_id}:connections",con.connection_id)
+				self.users[user_id].remove(con)
+				redis_key = RedisKeys.user_connections(user_id)
+				await r.srem(redis_key,con.connection_id)
 			except Exception:
-				pass
+				await self.disconnect(user_id, con.ws)
 		if(user_id in self.users and not self.users[user_id]):
 			self.users.pop(user_id,None)
 

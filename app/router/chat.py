@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
-from app.schema.chat.conversation import CreateConversation
+from app.schema.chat.conversation import CreateConversation, ConversationPatch
 from app.dependencies import DBSession
 from app.core.security.auth import oauth2_scheme
 from app.services.user import user_service
+from app.services.cache_management.conversation import conversation_cache
 from app.models.chat.conversations import Conversation,ConversationType
 from app.models.chat.participants import ConversationParticipant,ParticipantRole
 from app.models.chat.messages import Message,MessageType,MessageDeleteState,MessageReceipt
@@ -73,11 +74,81 @@ async def create_coversation(form_data:CreateConversation,db:DBSession,token:str
             ))
     
     await db.commit()
+    await conversation_cache.sync_conversation(str(conversation.id), db)
     
     return {
         "message":"Group created",
         "conversation_id":conversation.id
     }
+
+@router.patch("/conversation/{conversation_id}")
+async def patch_conversation(
+    conversation_id: str,
+    data: ConversationPatch,
+    db: DBSession,
+    token: str = Depends(oauth2_scheme),
+):
+    token_user = await user_service.get_current_user(db, token)
+
+    conversation = await db.get(
+        Conversation,
+        UUID(conversation_id)
+    )
+
+    if not conversation:
+        raise HTTPException(
+            status_code=404,
+            detail="Conversation not found"
+        )
+
+    if conversation.is_deleted:
+        raise HTTPException(
+            status_code=404,
+            detail="Conversation not found"
+        )
+
+    # These properties only make sense for groups
+    if conversation.type != ConversationType.GROUP:
+        if data.model_fields_set:
+            raise HTTPException(
+                status_code=400,
+                detail="Name, description and avatar are only allowed for group conversations"
+            )
+
+    # TODO: replace with your existing participant/admin check
+    participant = await db.scalar(
+        select(ConversationParticipant).where(
+            ConversationParticipant.conversation_id == conversation.id,
+            ConversationParticipant.user_id == token_user.id,
+        )
+    )
+
+    if not participant:
+        raise HTTPException(
+            status_code=403,
+            detail="You are not a member of this conversation"
+        )
+
+    if "name" in data.model_fields_set:
+        conversation.name = data.name
+
+    if "description" in data.model_fields_set:
+        conversation.description = data.description
+
+    if "avatar_url" in data.model_fields_set:
+        conversation.avatar_url = data.avatar_url
+
+    await db.commit()
+    await db.refresh(conversation)
+
+    return {
+        "conversation_id": conversation.id,
+        "type": conversation.type.value,
+        "name": conversation.name,
+        "description": conversation.description,
+        "avatar_url": conversation.avatar_url,
+    }
+
 
 @router.post('/join-group')
 async def join_group(group_id:str,db:DBSession,token:str = Depends(oauth2_scheme)):
@@ -119,6 +190,9 @@ async def join_group(group_id:str,db:DBSession,token:str = Depends(oauth2_scheme
         )
     )
     await db.commit()
+    await conversation_cache.add_member(
+        group_id,str(token_user.id)
+    )
     return {
         "message":f"Joined in group {group_id}",
         "group":conversation
@@ -243,6 +317,8 @@ async def add_member(
         db.add_all(new_participants)
         db.add_all(system_messages)
         await db.commit()
+        await conversation_cache.add_members(group_id,[str(p.user_id) for p in new_participants])
+        
 
     return {
         "message": "Operation completed.",
@@ -256,7 +332,7 @@ async def add_member(
 @router.post('/leave-group')
 async def leave_group(group_id:str,db:DBSession,token:str = Depends(oauth2_scheme)):
     token_user = await user_service.get_current_user(db, token)
-    conversation_res = await db.execute(select(Conversation).where(Conversation.id == group_id))
+    conversation_res = await db.execute(select(Conversation).where(Conversation.id == UUID(group_id)))
     conversation = conversation_res.scalar_one_or_none()
 
     if not conversation:
@@ -269,7 +345,7 @@ async def leave_group(group_id:str,db:DBSession,token:str = Depends(oauth2_schem
         select(ConversationParticipant)
         .where(
             ConversationParticipant.user_id == token_user.id,
-            ConversationParticipant.conversation_id == group_id
+            ConversationParticipant.conversation_id == UUID(group_id)
         ))
     existing_member = existing_mem_res.scalar_one_or_none()
     if not existing_member:
@@ -278,12 +354,13 @@ async def leave_group(group_id:str,db:DBSession,token:str = Depends(oauth2_schem
     await db.delete(existing_member)
     db.add(
         Message(
-            conversation_id=group_id,
+            conversation_id=UUID(group_id),
             sender_id=token_user.id,
             type=MessageType.SYSTEM,
             message=f"{token_user.username} left group"
     ))
     await db.commit()
+    await conversation_cache.remove_member(group_id,str(token_user.id))
     return {
         "message": "Left group"
     }
@@ -292,11 +369,13 @@ from sqlalchemy.orm import joinedload, aliased
 
 @router.post("/remove-member")
 async def remove_member(
-    target_id: UUID,
-    group_id: UUID,
+    target_id: str,
+    group_id: str,
     db: DBSession,
     token: str = Depends(oauth2_scheme),
 ):
+    target_id=UUID(target_id)
+    group_id=UUID(group_id)
     token_user = await user_service.get_current_user(db, token)
 
     # Check the caller's role, not the target's role
@@ -350,6 +429,7 @@ async def remove_member(
     )
 
     await db.commit()
+    await conversation_cache.remove_member(str(group_id),str(target_id))
 
     return {
         "message": f"{token_user.username} removed {target_participant.user.username}"
@@ -361,7 +441,7 @@ async def create_dm(db:DBSession,target_id:str,token:str=Depends(oauth2_scheme))
     token_user = await user_service.get_current_user(db,token)
     if(target_id == token_user.id):
         raise HTTPException(status_code=401,detail="Cannot make a dm yourself")
-    target_user = user_service.get_user_with_id(db,target_id)
+    target_user = await user_service.get_user_with_id(db,target_id)
     if not target_user:
         raise HTTPException(status_code=401,detail="Target user not found")
     existing_dm =await db.execute(
@@ -374,6 +454,14 @@ async def create_dm(db:DBSession,target_id:str,token:str=Depends(oauth2_scheme))
             ConversationParticipant.user_id.in_(
                 [token_user.id, target_id]
             )
+        )
+        .group_by(
+            Conversation.id
+        )
+        .having(
+            func.count(
+                func.distinct(ConversationParticipant.user_id)
+            ) == 2
         )
     )
     conversation = existing_dm.scalar_one_or_none()
@@ -402,7 +490,10 @@ async def create_dm(db:DBSession,target_id:str,token:str=Depends(oauth2_scheme))
     )
 
     await db.commit()
-
+    await ConversationCache.sync_conversation(
+        conversation.id,
+        db
+    )
     return {
         "message": "DM created",
         "conversation_id": dm.id

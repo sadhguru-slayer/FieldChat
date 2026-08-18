@@ -3,6 +3,7 @@ from sqlalchemy import String, DateTime, Boolean, Enum
 from datetime import datetime,timezone
 from app.models.base import Base,UUIDMixin
 import enum
+from sqlalchemy.dialects.postgresql import JSONB
 
 class ConversationType(enum.Enum):
     PERSONAL="PERSONAL"
@@ -27,6 +28,21 @@ class Conversation(UUIDMixin,Base):
     is_deleted :Mapped[bool] = mapped_column(
         Boolean,
         default=False
+    )
+    description: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True
+    )
+
+    avatar_url: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True
+    )
+
+    settings: Mapped[dict] = mapped_column(
+        JSONB,
+        default=dict,
+        nullable=False
     )
 
     # Relationships
