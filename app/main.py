@@ -9,6 +9,7 @@ from app.router.messages import general_message_router
 from app.router.messages import router as message_router
 from app.router.profile import profile_router
 from app.router.settings import settings_router
+from app.ws.sockets import router as MessageRouter
 from app.admin import *
 from fastadmin import fastapi_app as admin_app
 from app.redis_client import r
@@ -49,6 +50,7 @@ app.include_router(token_router)
 app.include_router(user_router)
 app.include_router(profile_router)
 app.include_router(settings_router)
+app.include_router(MessageRouter)
 app.include_router(message_router)
 app.include_router(chat_router)
 # app.include_router(general_chat_router)

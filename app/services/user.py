@@ -30,4 +30,29 @@ class UserService:
             raise HTTPException(401,"User not found")
         return user
 
+    @classmethod
+    async def get_user_with_id_ws(cls, db,user_id:str):
+        result= await db.execute(select(User).where(
+            User.id == UUID(user_id)
+        ))
+        return result.scalar_one_or_none()
+
+    async def get_current_user_ws(
+        db,
+        token: str
+    ):
+
+        payload = verify_access_token(token)
+
+        if not payload:
+            return None
+
+        user_id = payload.get("sub")
+
+        stmt = select(User).where(User.id == user_id)
+
+        result = await db.execute(stmt)
+
+        return result.scalar_one_or_none()
+
 user_service = UserService()

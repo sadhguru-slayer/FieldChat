@@ -25,7 +25,13 @@ class ConversationCache:
                 )
 
             await pipe.execute()
-
+    
+    @classmethod
+    async def get_user_conversations(cls, user_id:str):
+        conversations = await r.smembers(
+            RedisKeys.user_conversations(user_id)
+        )
+        return conversations
 
     @classmethod
     async def remove_member(cls, conversation_id: str, user_id:str):
