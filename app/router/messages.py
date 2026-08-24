@@ -101,7 +101,10 @@ async def get_messages(
     rows = result.all()
     events = []
 
+    # print(conversation.type,"CONV TYPE-----------------------")
     for message, username, is_deleted_for_me, delivered, read in rows:
+        # print(delivered,"D-----------------------")
+        # # print(read,"R-----------------------")
         if conversation.type == ConversationType.GROUP:
             read = False
 

@@ -15,6 +15,8 @@ from fastadmin import fastapi_app as admin_app
 from app.redis_client import r
 from app.database import init_db, SessionLocal
 from app.services.cache_management.conversation import conversation_cache
+from app.redis.subscribers import start_redis_listener
+import asyncio
 
 from app.database import init_db
 @asynccontextmanager
@@ -34,6 +36,7 @@ async def lifespan(app:FastAPI):
                 await conversation_cache.sync_all(db)
         finally:
             await lock.release()
+    asyncio.create_task(start_redis_listener())
     yield
     # Shutdown
     pass

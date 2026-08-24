@@ -465,23 +465,24 @@ class MessageService:
             data=event_payload,
         )
 
-    async def mark_delivered(
-        self,
-        user,
-        message_id,
-    ):
+    async def mark_delivered(self, user, conversation_id, message_id):
+        if not conversation_id or not message_id:
+            return ServiceResult(success=False, error="NOT_ENOUGH_PARAMETERS")
+
+        if not await conversation_cache.is_member(
+            str(conversation_id),
+            str(user.id),
+        ):
+            return ServiceResult(success=False, error="NOT_CONVERSATION_MEMBER")
+
         stmt = select(Message).where(
             Message.id == message_id,
+            Message.conversation_id == conversation_id,
         )
-
-        result = await self.db.execute(stmt)
-        message = result.scalar_one_or_none()
+        message = (await self.db.execute(stmt)).scalar_one_or_none()
 
         if not message:
-            return ServiceResult(
-                success=False,
-                error="MESSAGE_NOT_FOUND",
-            )
+            return ServiceResult(success=False, error="MESSAGE_NOT_FOUND")
 
         if message.sender_id == user.id:
             return ServiceResult(
@@ -489,57 +490,66 @@ class MessageService:
                 error="CANNOT_RECEIPT_OWN_MESSAGE",
             )
 
-        # Don't create duplicate receipt
         stmt = select(MessageReceipt).where(
             MessageReceipt.message_id == message.id,
             MessageReceipt.user_id == user.id,
         )
+        receipt = (await self.db.execute(stmt)).scalar_one_or_none()
 
-        receipt = (
-            await self.db.execute(stmt)
-        ).scalar_one_or_none()
+        if receipt and receipt.delivered_at is not None:
+            return ServiceResult(success=True, data=receipt)
+
+        now = datetime.now(timezone.utc)
 
         if not receipt:
             receipt = MessageReceipt(
                 message_id=message.id,
                 user_id=user.id,
-                delivered_at=datetime.now(timezone.utc),
+                delivered_at=now,
             )
             self.db.add(receipt)
-
-        elif receipt.delivered_at is None:
-            receipt.delivered_at = datetime.now(timezone.utc)
-
         else:
-            return ServiceResult(
-                success=True,
-                data=None,
-            )
+            receipt.delivered_at = now
 
         await self.db.commit()
+        await self.db.refresh(receipt)
 
-        return ServiceResult(
-            success=True,
-            data=receipt,
+        event_payload = self._build_event(
+            MessageEvent.MESSAGE_DELIVERED,
+            message.id,
+            conversation_id,
+            sender_id=message.sender_id,
+            user_id=user.id,
+            timestamp=receipt.delivered_at,
         )
 
-    async def mark_read(
-        self,
-        user,
-        message_id,
-    ):
+        # Receipt goes to the original sender
+        await r.publish(
+            RedisKeys.user_chanel(str(message.sender_id)),
+            event_payload.model_dump_json(),
+        )
+
+        return ServiceResult(success=True, data=receipt)
+
+
+    async def mark_read(self, user, conversation_id, message_id):
+        if not conversation_id or not message_id:
+            return ServiceResult(success=False, error="NOT_ENOUGH_PARAMETERS")
+
+        if not await conversation_cache.is_member(
+            str(conversation_id),
+            str(user.id),
+        ):
+            return ServiceResult(success=False, error="NOT_CONVERSATION_MEMBER")
+
         stmt = select(Message).where(
             Message.id == message_id,
+            Message.conversation_id == conversation_id,
         )
-
-        result = await self.db.execute(stmt)
-        message = result.scalar_one_or_none()
+        message = (await self.db.execute(stmt)).scalar_one_or_none()
 
         if not message:
-            return ServiceResult(
-                success=False,
-                error="MESSAGE_NOT_FOUND",
-            )
+            return ServiceResult(success=False, error="MESSAGE_NOT_FOUND")
 
         if message.sender_id == user.id:
             return ServiceResult(
@@ -551,10 +561,7 @@ class MessageService:
             MessageReceipt.message_id == message.id,
             MessageReceipt.user_id == user.id,
         )
-
-        receipt = (
-            await self.db.execute(stmt)
-        ).scalar_one_or_none()
+        receipt = (await self.db.execute(stmt)).scalar_one_or_none()
 
         now = datetime.now(timezone.utc)
 
@@ -569,10 +576,7 @@ class MessageService:
 
         else:
             if receipt.read_at is not None:
-                return ServiceResult(
-                    success=True,
-                    data=None,
-                )
+                return ServiceResult(success=True, data=receipt)
 
             if receipt.delivered_at is None:
                 receipt.delivered_at = now
@@ -580,11 +584,25 @@ class MessageService:
             receipt.read_at = now
 
         await self.db.commit()
+        await self.db.refresh(receipt)
 
-        return ServiceResult(
-            success=True,
-            data=receipt,
+        event_payload = self._build_event(
+            MessageEvent.MESSAGE_READ,
+            message.id,
+            conversation_id,
+            sender_id=message.sender_id,
+            user_id=user.id,
+            timestamp=receipt.read_at,
         )
+
+        # Receipt goes to the original sender
+        await r.publish(
+            RedisKeys.user_chanel(str(message.sender_id)),
+            event_payload.model_dump_json(),
+        )
+
+        return ServiceResult(success=True, data=receipt)
+
 
     async def add_reaction(self, user, conversation_id, message_id, reaction):
         if not await conversation_cache.is_member(str(conversation_id), str(user.id)):
@@ -690,4 +708,3 @@ class MessageService:
 
 
         return ServiceResult(success=True, data=event_payload)
-
