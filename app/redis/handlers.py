@@ -1,7 +1,23 @@
 import json
 from app.redis_client import r
 from app.services.cache_management.conversation import conversation_cache
+from app.services.cache_management.presence import presence_cache
 from app.ws.manager import manager
+
+async def handle_presence(payload: dict):
+    target_user_id = payload["user_id"]
+
+    watchers = await presence_cache.watchers(target_user_id)
+
+    event_payload = {
+        "event": payload["event"],
+        "user_id": target_user_id,
+        "online": payload["online"]
+    }
+
+    for watcher in watchers:
+        watcher_id = int(watcher)
+        await manager.send_to_user(watcher_id, event_payload)
 
 async def conversation_handler(channel:str, data:dict):
     conversation_id = channel.split(":")[1]

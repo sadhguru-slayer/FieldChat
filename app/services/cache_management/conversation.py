@@ -62,12 +62,11 @@ class ConversationCache:
     # ==================================================================================
     @classmethod
     async def sync_conversation(cls, conversation_id:str,db):
-        user_ids = await db.scalars(
-            (
+        scalars = await db.scalars(
             select(ConversationParticipant.user_id)
             .where(ConversationParticipant.conversation_id == UUID(conversation_id))
-            )
-            ).all()
+        )
+        user_ids = scalars.all()
         conv_key = RedisKeys.conversation_members(conversation_id)
         async with r.pipeline() as pipe:
             pipe.delete(conv_key)

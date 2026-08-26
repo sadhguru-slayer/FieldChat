@@ -21,6 +21,12 @@ class RefreshToken(UUIDMixin,Base):
         default=datetime.utcnow,
         onupdate=datetime.utcnow
     )
+    device_id: Mapped[str | None] = mapped_column(
+        String(255),
+        index=True,
+        nullable=True,
+    )
+
     device_name:Mapped[str] = mapped_column(
         String(100),
         nullable=True

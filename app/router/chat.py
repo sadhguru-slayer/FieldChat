@@ -66,11 +66,10 @@ async def create_coversation(form_data:CreateConversation,db:DBSession,token:str
 
         if conversation.type == ConversationType.GROUP:
             db.add(Message(
-                conversation_id = conversation.id,
-                sender_id=0,
+                conversation_id=conversation.id,
+                sender_id=token_user.id,
                 type=MessageType.SYSTEM,
-                message=f"{user_exist.username} joined group"
-
+                message=f"{user_exist.username} joined group",
             ))
     
     await db.commit()
@@ -499,8 +498,70 @@ async def create_dm(db:DBSession,target_id:str,token:str=Depends(oauth2_scheme))
         "conversation_id": dm.id
     }
 
+def build_latest_message(
+    message,
+    username,
+    delete_state,
+    receipt,
+    current_user_id,
+    *,
+    is_group: bool,
+):
+    if not message:
+        return None
 
-@router.get('get-user-groups')
+    is_me = message.sender_id == current_user_id
+
+    if is_me:
+        sender = "You"
+    elif is_group:
+        sender = username.split(" ")[0] if username else None
+    else:
+        sender = None
+
+    return {
+        "id": str(message.id),
+        "sender_id": str(message.sender_id) if message.sender_id else None,
+        "sender": sender,
+
+        "content": (
+            "Deleted for everyone"
+            if message.is_deleted_global
+            else "Deleted for me"
+            if delete_state
+            else message.message
+        ),
+
+        "timestamp": message.timestamp,
+
+        "is_deleted_for_everyone": message.is_deleted_global,
+        "is_deleted_for_me": delete_state is not None,
+
+        "is_delivered": (
+            receipt is not None
+            and receipt.delivered_at is not None
+        ),
+
+        "is_read": (
+            receipt is not None
+            and receipt.read_at is not None
+        ),
+
+        "delivered_at": (
+            receipt.delivered_at
+            if receipt
+            else None
+        ),
+
+        "read_at": (
+            receipt.read_at
+            if receipt
+            else None
+        ),
+    }
+
+
+@router.get('/get-user-groups')
 async def get_user_groups(db:DBSession,token:str = Depends(oauth2_scheme)):
     token_user = await user_service.get_current_user(db,token)
 
@@ -565,27 +626,14 @@ async def get_user_groups(db:DBSession,token:str = Depends(oauth2_scheme)):
             "title": group.name,
             "type": group.type.value,
             "role": role.value,
-            "latest_message": (
-                {
-                    "content": (
-                        "Deleted for everyone"
-                        if message.is_deleted_global
-                        else "Deleted for me"
-                        if delete_state
-                        else message.message
-                    ),
-                    "timestamp": message.timestamp,
-                    "sender": username.split(" ")[0] if username else None,
-                    "is_deleted_for_everyone": message.is_deleted_global,
-                    "is_deleted_for_me": delete_state is not None,
-                    "is_delivered": (
-                        receipt is not None
-                        and receipt.delivered_at is not None
-                    )
-                }
-                if message
-                else None
-            )
+            "latest_message": build_latest_message(
+                message=message,
+                username=username,
+                delete_state=delete_state,
+                receipt=receipt,
+                current_user_id=token_user.id,
+                is_group=True,
+            ),
         }
         for group, role, message, username, delete_state, receipt in groups
     ]
@@ -665,18 +713,16 @@ async def get_user_dms(db:DBSession,token:str=Depends(oauth2_scheme)):
 
     return [{
         "id": conversation.id, "name": username, "type": conversation.type.value,
-        "latest_message": {
-            "sender": "You" if latest_sender_id == token_user.id else (latest_sender.split(" ")[0] if latest_sender else None),
-            "content": "Deleted for everyone" if message.is_deleted_global else "Deleted for me" if delete_state else message.message,
-            "timestamp": message.timestamp,
-            "is_deleted_for_everyone": message.is_deleted_global,
-            "is_deleted_for_me": delete_state is not None,
-            "delivered_at": receipt.delivered_at if receipt else None,
-            "read_at": receipt.read_at if receipt else None,
-            "is_delivered": receipt is not None and receipt.delivered_at is not None,
-            "is_read": receipt is not None and receipt.read_at is not None
-        } if message else None
+        "latest_message": build_latest_message(
+                message=message,
+                username=latest_sender,
+                delete_state=delete_state,
+                receipt=receipt,
+                current_user_id=token_user.id,
+                is_group=False,
+        ),
     } for conversation, username, message, delete_state, receipt, latest_sender_id, latest_sender in rows]
+
 
 @router.delete('/delete-group')
 async def delete_group(group_id:str,db:DBSession,token:str = Depends(oauth2_scheme)):
@@ -703,6 +749,138 @@ async def delete_group(group_id:str,db:DBSession,token:str = Depends(oauth2_sche
     await db.commit()
     return {"message": "Group deleted successfully"}
     
+from sqlalchemy import or_, select
+from app.models.profile.profile import UserProfile
+
+@router.get("/search")
+async def global_search(q: str, db: DBSession, token: str = Depends(oauth2_scheme)):
+    token_user = await user_service.get_current_user(db, token)
+    search_term = f"%{q.strip()}%"
+    print(search_term)
+
+    users = (
+        await db.execute(
+            select(
+                User.id,
+                User.username,
+                User.email,
+                User.is_active,
+                UserProfile.display_name,
+                UserProfile.avatar_url,
+            )
+            .outerjoin(UserProfile, UserProfile.user_id == User.id)
+            .where(
+                User.id != token_user.id,
+                or_(
+                    User.username.ilike(search_term),
+                    User.email.ilike(search_term),
+                    UserProfile.display_name.ilike(search_term),
+                ),
+            )
+            .limit(20)
+        )
+    ).mappings().all()
+
+    groups = (
+        await db.execute(
+            select(
+                Conversation.id,
+                Conversation.name,
+                Conversation.description,
+                Conversation.avatar_url,
+            )
+            .join(ConversationParticipant, ConversationParticipant.conversation_id == Conversation.id)
+            .where(
+                ConversationParticipant.user_id == token_user.id,
+                Conversation.type == ConversationType.GROUP,
+                Conversation.is_deleted.is_(False),
+                or_(
+                    Conversation.name.ilike(search_term),
+                    Conversation.description.ilike(search_term),
+                ),
+            )
+            .limit(20)
+        )
+    ).mappings().all()
+    print(groups)
+    return {
+        "users": [
+            {
+                "id": str(u.id),
+                "username": u.username,
+                "email": u.email,
+                "display_name": u.display_name,
+                "avatar_url": u.avatar_url,
+                "is_active": u.is_active,
+            }
+            for u in users
+        ],
+        "groups": [
+            {
+                "id": str(g.id),
+                "name": g.name,
+                "description": g.description,
+                "avatar_url": g.avatar_url,
+            }
+            for g in groups
+        ],
+    }
+
+
+@router.get('/get-group-members')
+async def get_group_members(group_id: str, db: DBSession, token: str = Depends(oauth2_scheme)):
+    token_user = await user_service.get_current_user(db, token)
+    
+    # Check if user is in the group
+    is_member = await db.scalar(
+        select(ConversationParticipant).where(
+            ConversationParticipant.conversation_id == UUID(group_id),
+            ConversationParticipant.user_id == token_user.id
+        )
+    )
+    if not is_member:
+        raise HTTPException(status_code=403, detail="You are not a member of this group")
+
+    mem_res = await db.execute(
+        select(
+            ConversationParticipant.role,
+            ConversationParticipant.joined_at,
+            User.id,
+            User.username,
+            User.email,
+            User.is_active,
+            UserProfile.avatar_url,
+            UserProfile.display_name,
+        )
+        .join(
+            User,
+            User.id == ConversationParticipant.user_id
+        )
+        .outerjoin(
+            UserProfile,
+            UserProfile.user_id == User.id
+        )
+        .where(
+            ConversationParticipant.conversation_id == UUID(group_id)
+        )
+    )
+
+    members = mem_res.mappings().all()
+
+    return [
+        {
+            "id": str(m.id),
+            "username": m.username,
+            "email": m.email,
+            "display_name": m.display_name,
+            "avatar_url": m.avatar_url,
+            "is_active": m.is_active,
+            "role": m.role.value,
+            "joined_at": m.joined_at,
+        }
+        for m in members
+    ]
+
 
 @general_chat_router.get('/get-all-groups')
 async def get_all_groups(db:DBSession):
@@ -710,15 +888,6 @@ async def get_all_groups(db:DBSession):
     conversations = results.scalars().all()
     return conversations
 
-@general_chat_router.get('/get-group-members')
-async def get_group_members(group_id:str, db:DBSession):
-    mem_res = await db.execute(
-        select(ConversationParticipant).
-
-        where(ConversationParticipant.conversation_id == group_id)
-    )
-    members = mem_res.scalars().all()
-    return members
 
 @general_chat_router.get('/get-participant-details')
 async def get_participant_details(participant_id:str,group_id:str,db:DBSession):

@@ -19,16 +19,30 @@ class UserService:
         return result.scalar_one_or_none()
 
     @classmethod
-    async def get_current_user(cls, db,token:str):
+    async def get_current_user(cls, db, token: str, device_id: str | None = None):
         payload = token_manager.decode_token(token)
-        user_id  = payload.get("sub")
-        if not user_id :
-            raise HTTPException(401,"Invalid token payload")
-        result = await db.execute(select(User).where(User.id==UUID(user_id)))
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(401, "Invalid token payload")
+        result = await db.execute(select(User).where(User.id == UUID(user_id)))
         user = result.scalar_one_or_none()
         if not user:
-            raise HTTPException(401,"User not found")
+            raise HTTPException(401, "User not found")
+
+        if device_id:
+            from app.models.auth.refresh import RefreshToken
+            res = await db.execute(
+                select(RefreshToken).where(
+                    RefreshToken.user_id == UUID(user_id),
+                    RefreshToken.device_id == device_id
+                )
+            )
+            refresh_session = res.scalars().first()
+            if refresh_session and refresh_session.revoked:
+                raise HTTPException(401, "Session has been revoked")
+
         return user
+
 
     @classmethod
     async def get_user_with_id_ws(cls, db,user_id:str):
@@ -37,22 +51,16 @@ class UserService:
         ))
         return result.scalar_one_or_none()
 
-    async def get_current_user_ws(
-        db,
-        token: str
-    ):
-
-        payload = verify_access_token(token)
-
+    @classmethod
+    async def get_current_user_ws(cls, db, token: str):
+        payload = token_manager.decode_token(token)
         if not payload:
             return None
-
         user_id = payload.get("sub")
-
-        stmt = select(User).where(User.id == user_id)
-
+        if not user_id:
+            return None
+        stmt = select(User).where(User.id == UUID(user_id))
         result = await db.execute(stmt)
-
         return result.scalar_one_or_none()
 
 user_service = UserService()

@@ -161,13 +161,14 @@ async def login(request:Request,db:DBSession,form_data:Annotated[OAuth2PasswordR
 
     ip_address = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent")
+    device_id = request.headers.get("x-device-id")
 
     access_token = token_manager.create_access_token(str(user.id))
-    refresh_token = await auth_service.store_refresh_token(db,user.id,ip_address,user_agent)
+    refresh_token = await auth_service.store_refresh_token(db, user.id, ip_address, user_agent, device_id)
     return {
-        "access_token":access_token,
-        "refresh_token":refresh_token,
-        "token_type":"bearer"
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer"
     }
 
 @router.post("/logout")

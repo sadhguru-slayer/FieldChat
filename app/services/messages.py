@@ -662,7 +662,7 @@ class MessageService:
             event_payload.model_dump_json(),
         )
 
-        print(event_payload)
+        # print(event_payload)
 
         return ServiceResult(success=True, data=event_payload)
 

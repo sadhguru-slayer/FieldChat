@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from fastapi import WebSocket
 from app.redis_client import r
 from app.redis.keys import RedisKeys
+from app.services.cache_management.presence import presence_cache
 
 import json
 from uuid6 import uuid7
@@ -71,6 +72,10 @@ class ConnectionManager:
 	def get_local_members(self,conversation_id:str):
 		return self.local_conversations.get(conversation_id,set())
 
+	def _find_connection(self, user_id: str, ws: WebSocket):
+		return self._get_conv(user_id, ws)
+
+
 	async def disconnect(self,user_id:int,ws:WebSocket):
 		connections = self.users.get(user_id,[])
 
@@ -121,7 +126,22 @@ class ConnectionManager:
 			pass
 			print(f"Error removing connection from Redis: {e}")
 
-		# Add presencecache cleanup later
+		from app.services.cache_management.presence import presence_cache
+
+		for target_user_id in list(disconnected.watched_users):
+			try:
+				await presence_cache.unwatch(
+					watcher_id=user_id,
+					target_user_id=target_user_id,
+				)
+			except Exception as e:
+				print(
+					f"Failed to unwatch {target_user_id} for {user_id}: {e}"
+				)
+
+		disconnected.watched_users.clear()
+
+
 
 	async def send_to_user(self, user_id:str,payload:dict):
 		connections = self.users.get(user_id,None)
