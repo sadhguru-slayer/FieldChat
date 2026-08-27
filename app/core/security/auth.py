@@ -37,7 +37,7 @@ class TokenManager:
     def create_access_token(self, user_id: str) -> str:
         return self.create_token(
             {"sub": user_id, "type": "access"},
-            timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+            timedelta(days=settings.ACCESS_TOKEN_EXPIRE_DAYS)
         )
 
 
