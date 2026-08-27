@@ -37,10 +37,10 @@ async def lifespan(app:FastAPI):
                 await conversation_cache.sync_all(db)
         finally:
             await lock.release()
-    asyncio.create_task(start_redis_listener())
+    listener_task = asyncio.create_task(start_redis_listener())
+    app.state.redis_listener = listener_task
     yield
-    # Shutdown
-    pass
+    listener_task.cancel()
 
 app = FastAPI(
     title="Chat-Application",

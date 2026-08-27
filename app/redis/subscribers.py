@@ -9,24 +9,26 @@ async def start_redis_listener():
     await pubsub.psubscribe("conversation:*", "user:*", "presence")
 
     async for message in pubsub.listen():
+        try:
+            if message["type"] != "pmessage":
+                continue
 
-        if message["type"] != "pmessage":
-            continue
+            channel = message["channel"]
+            if isinstance(channel, bytes):
+                channel = channel.decode()
 
-        channel = message["channel"]
-        if isinstance(channel, bytes):
-            channel = channel.decode()
+            raw = message["data"]
+            if isinstance(raw, bytes):
+                raw = raw.decode("utf-8")
 
-        raw = message["data"]
-        if isinstance(raw, bytes):
-            raw = raw.decode("utf-8")
+            payload = json.loads(raw)
 
-        payload = json.loads(raw)
-
-        if channel.startswith("conversation:"):
-            await conversation_handler(channel, payload)
-        elif channel.startswith("user:"):
-            await user_handler(channel, payload)
-        elif channel == "presence":
-            await handle_presence(payload)
+            if channel.startswith("conversation:"):
+                await conversation_handler(channel, payload)
+            elif channel.startswith("user:"):
+                await user_handler(channel, payload)
+            elif channel == "presence":
+                await handle_presence(payload)
+        except Exception as e:
+            print(f"[Redis Listener Error] {e}")
 
