@@ -38,7 +38,7 @@ services:
   #
   alembic:
     profiles:
-    - migration
+      - migration
     build:
       context: .
       dockerfile: Dockerfile
