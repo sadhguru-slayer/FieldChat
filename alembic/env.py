@@ -21,6 +21,15 @@ if config.config_file_name is not None:
 from app.config import settings
 from app.models.base import Base
 
+# Import all models so SQLAlchemy registers them with Base.metadata
+from app.models.auth.user import User
+from app.models.auth.refresh import RefreshToken
+from app.models.chat.conversations import Conversation
+from app.models.chat.messages import Message
+from app.models.chat.participants import ConversationParticipant
+from app.models.profile.profile import UserProfile
+from app.models.profile.settings import UserSettings
+
 config.set_main_option(
     "sqlalchemy.url",
     settings.DATABASE_URL_SYNC.replace("%", "%%")
