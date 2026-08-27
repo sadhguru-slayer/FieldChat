@@ -1,12 +1,12 @@
 import json
 from app.redis_client import r
-from app.redis.handlers import conversation_handler, user_handler
+from app.redis.handlers import conversation_handler, user_handler, handle_presence
 from app.ws.manager import manager
 
 async def start_redis_listener():
     pubsub = r.pubsub()
 
-    await pubsub.psubscribe("conversation:*","user:*")
+    await pubsub.psubscribe("conversation:*", "user:*", "presence")
 
     async for message in pubsub.listen():
 
@@ -26,5 +26,7 @@ async def start_redis_listener():
         if channel.startswith("conversation:"):
             await conversation_handler(channel, payload)
         elif channel.startswith("user:"):
-            await user_handler(channel,payload)
+            await user_handler(channel, payload)
+        elif channel == "presence":
+            await handle_presence(payload)
 

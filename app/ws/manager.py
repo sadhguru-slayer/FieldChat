@@ -7,6 +7,7 @@ from app.redis.keys import RedisKeys
 from app.services.cache_management.presence import presence_cache
 
 import json
+import time
 from uuid6 import uuid7
 
 @dataclass
@@ -113,20 +114,19 @@ class ConnectionManager:
 			remaining_count = await r.scard(redis_key)
 			if remaining_count == 0:
 				await r.delete(redis_key)
-				await r.srem("online_users",user_id)
+				await presence_cache.set_offline(str(user_id))
 				await r.publish(
 					"presence",
-                    json.dumps({
-                        "event": "presence",
-                        "user_id": user_id,
-                        "online": False
-                    })
+					json.dumps({
+						"event": "presence",
+						"user_id": user_id,
+						"online": False,
+						"last_seen": int(time.time()),
+					})
 				)
 		except Exception as e:
-			pass
 			print(f"Error removing connection from Redis: {e}")
 
-		from app.services.cache_management.presence import presence_cache
 
 		for target_user_id in list(disconnected.watched_users):
 			try:

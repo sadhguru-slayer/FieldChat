@@ -9,15 +9,9 @@ async def handle_presence(payload: dict):
 
     watchers = await presence_cache.watchers(target_user_id)
 
-    event_payload = {
-        "event": payload["event"],
-        "user_id": target_user_id,
-        "online": payload["online"]
-    }
-
     for watcher in watchers:
-        watcher_id = int(watcher)
-        await manager.send_to_user(watcher_id, event_payload)
+        watcher_id = watcher.decode() if isinstance(watcher, bytes) else str(watcher)
+        await manager.send_to_user(watcher_id, payload)
 
 async def conversation_handler(channel:str, data:dict):
     conversation_id = channel.split(":")[1]

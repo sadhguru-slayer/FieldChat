@@ -44,3 +44,7 @@ class RedisKeys:
     @staticmethod
     def online_users()->str:
         return f"online_users"
+
+    @staticmethod
+    def last_seen(user_id:str)->str:
+        return f"presence:last_seen:{user_id}"

@@ -162,14 +162,19 @@ async def web_socket_endpoint(
 
                             await presence_cache.watch(
                                 watcher_id=str(user.id),
-                                target_id=str(other_user_id),
+                                target_user_id=str(other_user_id),
                             )
                             online = await presence_cache.online(str(other_user_id))
+
+                            last_seen = None
+                            if not online:
+                                last_seen = await presence_cache.get_last_seen(str(other_user_id))
 
                             await ws.send_json({
                                 "event": "presence",
                                 "user_id": str(other_user_id),
                                 "online": bool(online),
+                                "last_seen": last_seen,
                             })
             elif event == "conversation.left":
                 conversation_id = data.get("conversation_id")

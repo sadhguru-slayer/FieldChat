@@ -4,6 +4,7 @@ from app.dependencies import DBSession
 from app.core.security.auth import oauth2_scheme
 from app.services.user import user_service
 from app.services.cache_management.conversation import conversation_cache
+from app.redis_client import r
 from app.models.chat.conversations import Conversation,ConversationType
 from app.models.chat.participants import ConversationParticipant,ParticipantRole
 from app.models.chat.messages import Message,MessageType,MessageDeleteState,MessageReceipt
@@ -574,6 +575,13 @@ async def get_user_groups(db:DBSession,token:str = Depends(oauth2_scheme)):
         .subquery()
     )
 
+    member_count_subquery = (
+        select(func.count(ConversationParticipant.user_id))
+        .where(ConversationParticipant.conversation_id == Conversation.id)
+        .correlate(Conversation)
+        .scalar_subquery()
+    )
+
     stmt = (
         select(
             Conversation,
@@ -581,7 +589,8 @@ async def get_user_groups(db:DBSession,token:str = Depends(oauth2_scheme)):
             Message,
             User.username,
             MessageDeleteState,
-            MessageReceipt
+            MessageReceipt,
+            member_count_subquery.label("member_count"),
         )
         .join(
             ConversationParticipant,
@@ -626,6 +635,7 @@ async def get_user_groups(db:DBSession,token:str = Depends(oauth2_scheme)):
             "title": group.name,
             "type": group.type.value,
             "role": role.value,
+            "member_count": member_count,
             "latest_message": build_latest_message(
                 message=message,
                 username=username,
@@ -635,7 +645,7 @@ async def get_user_groups(db:DBSession,token:str = Depends(oauth2_scheme)):
                 is_group=True,
             ),
         }
-        for group, role, message, username, delete_state, receipt in groups
+        for group, role, message, username, delete_state, receipt, member_count in groups
     ]
 
 
@@ -656,6 +666,7 @@ async def get_user_dms(db:DBSession,token:str=Depends(oauth2_scheme)):
     stmt = (
         select(
             Conversation,
+            User.id.label("other_user_id"),
             User.username,
             Message,
             MessageDeleteState,
@@ -711,8 +722,30 @@ async def get_user_dms(db:DBSession,token:str=Depends(oauth2_scheme)):
 
     rows = result.all()
 
+    # Batch-check presence: one Redis call instead of N calls per row
+    online_users: set = await r.smembers("online_users")
+
+    # Batch-fetch last_seen for all other users using a pipeline (1 round-trip)
+    from app.redis.keys import RedisKeys as RK
+    other_ids = [str(row[1]) if row[1] else None for row in rows]
+    last_seen_map: dict[str, int | None] = {}
+    if any(other_ids):
+        pipe = r.pipeline()
+        for uid in other_ids:
+            if uid:
+                pipe.get(RK.last_seen(uid))
+            else:
+                pipe.get("__null__")
+        results_ls = await pipe.execute()
+        for uid, val in zip(other_ids, results_ls):
+            if uid:
+                last_seen_map[uid] = int(val) if val is not None else None
+
     return [{
         "id": conversation.id, "name": username, "type": conversation.type.value,
+        "other_user_id": str(other_user_id) if other_user_id else None,
+        "is_online": str(other_user_id) in online_users if other_user_id else False,
+        "last_seen": last_seen_map.get(str(other_user_id)) if other_user_id else None,
         "latest_message": build_latest_message(
                 message=message,
                 username=latest_sender,
@@ -721,7 +754,7 @@ async def get_user_dms(db:DBSession,token:str=Depends(oauth2_scheme)):
                 current_user_id=token_user.id,
                 is_group=False,
         ),
-    } for conversation, username, message, delete_state, receipt, latest_sender_id, latest_sender in rows]
+    } for conversation, other_user_id, username, message, delete_state, receipt, latest_sender_id, latest_sender in rows]
 
 
 @router.delete('/delete-group')
