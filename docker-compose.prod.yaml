@@ -37,6 +37,8 @@ services:
   # docker compose run --rm alembic alembic upgrade head
   #
   alembic:
+    profiles:
+    - migration
     build:
       context: .
       dockerfile: Dockerfile
