@@ -4,7 +4,7 @@ from sqlalchemy import select
 from app.schema.auth.user import UserResponse, UserRegister
 from app.models.auth.user import User, UserRole
 from app.services.user import user_service
-# from app.router.auth import create_userame
+from app.router.auth import create_username
 from app.core.security.password import password_manager
 from uuid import UUID
 router = APIRouter(
@@ -36,7 +36,7 @@ async def create_admin(user_data: UserRegister, db: DBSession):
         raise HTTPException(status_code=400, detail="User already exists")
 
     user = User(
-        username=await create_userame(db, user_data.email),
+        username=await create_username(db, user_data.email),
         email=user_data.email,
         hashed_password=password_manager.hash_password(user_data.password),
         role=UserRole.ADMIN,
