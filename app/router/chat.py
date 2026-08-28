@@ -4,6 +4,8 @@ from app.dependencies import DBSession
 from app.core.security.auth import oauth2_scheme
 from app.services.user import user_service
 from app.services.cache_management.conversation import conversation_cache
+from app.services.notification_service import notification_service
+from app.models.notification import NotificationType
 from app.redis_client import r
 from app.models.chat.conversations import Conversation,ConversationType
 from app.models.chat.participants import ConversationParticipant,ParticipantRole
@@ -77,6 +79,25 @@ async def create_coversation(form_data:CreateConversation,db:DBSession,token:str
     
     await db.commit()
     await conversation_cache.sync_conversation(str(conversation.id), db)
+    
+    for p in form_data.participants:
+        if str(p) != str(token_user.id):
+            try:
+                await notification_service.send_notification(
+                    db=db,
+                    user_id=UUID(str(p)),
+                    title="Added to Group",
+                    body=f"{token_user.username} added you to '{conversation.name or 'Group'}'",
+                    type=NotificationType.SYSTEM,
+                    data={
+                        "conversation_id": str(conversation.id),
+                        "action": "ADDED_TO_GROUP",
+                        "username": token_user.username,
+                        "group_name": conversation.name or "Group",
+                    }
+                )
+            except Exception as e:
+                print(f"Failed to send group notification: {e}")
     
     return {
         "message":"Group created",
@@ -321,6 +342,24 @@ async def add_member(
         await db.commit()
         await conversation_cache.add_members(group_id,[str(p.user_id) for p in new_participants])
         
+        for p in new_participants:
+            try:
+                await notification_service.send_notification(
+                    db=db,
+                    user_id=p.user_id,
+                    title="Added to Group",
+                    body=f"{token_user.username} added you to '{conversation.name or 'Group'}'",
+                    type=NotificationType.SYSTEM,
+                    data={
+                        "conversation_id": str(conversation.id),
+                        "action": "ADDED_TO_GROUP",
+                        "username": token_user.username,
+                        "group_name": conversation.name or "Group",
+                    }
+                )
+            except Exception as e:
+                print(f"Failed to send add member notification: {e}")
+        
 
     return {
         "message": "Operation completed.",
@@ -432,6 +471,25 @@ async def remove_member(
 
     await db.commit()
     await conversation_cache.remove_member(str(group_id),str(target_id))
+
+    try:
+        group_obj = await db.get(Conversation, group_id)
+        group_name = group_obj.name if group_obj and group_obj.name else "Group"
+        await notification_service.send_notification(
+            db=db,
+            user_id=target_participant.user_id,
+            title="Removed from Group",
+            body=f"{token_user.username} removed you from '{group_name}'",
+            type=NotificationType.SYSTEM,
+            data={
+                "conversation_id": str(group_id),
+                "action": "REMOVED_FROM_GROUP",
+                "username": token_user.username,
+                "group_name": group_name,
+            }
+        )
+    except Exception as e:
+        print(f"Failed to send remove member notification: {e}")
 
     return {
         "message": f"{token_user.username} removed {target_participant.user.username}"
