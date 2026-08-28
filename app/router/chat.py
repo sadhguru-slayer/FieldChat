@@ -785,6 +785,19 @@ async def delete_group(group_id:str,db:DBSession,token:str = Depends(oauth2_sche
 from sqlalchemy import or_, select
 from app.models.profile.profile import UserProfile
 
+@router.post("/sync-conversations")
+async def sync_conversations(
+    db: DBSession = None,
+):
+    result = await conversation_cache.sync_all(db)
+
+    return {
+        "success": True,
+        "message": "Conversation cache synchronized successfully",
+        **result,
+    }
+
+
 @router.get("/search")
 async def global_search(q: str, db: DBSession, token: str = Depends(oauth2_scheme)):
     token_user = await user_service.get_current_user(db, token)
