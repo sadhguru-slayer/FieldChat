@@ -159,7 +159,11 @@ async def login(request:Request,db:DBSession,form_data:Annotated[OAuth2PasswordR
     if not password_manager.verify_password(form_data.password,user.hashed_password):
         raise HTTPException(401,"Invalid credentials")
 
-    ip_address = request.client.host if request.client else None
+    x_forwarded_for = request.headers.get("x-forwarded-for")
+    if x_forwarded_for:
+        ip_address = x_forwarded_for.split(",")[0].strip()
+    else:
+        ip_address = request.headers.get("x-real-ip") or (request.client.host if request.client else None)
     user_agent = request.headers.get("user-agent")
     device_id = request.headers.get("x-device-id")
 
