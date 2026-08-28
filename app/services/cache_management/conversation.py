@@ -80,7 +80,7 @@ class ConversationCache:
             await pipe.execute()
 
     @classmethod
-    async def sync_all(cls,db):
+    async def sync_all(cls, db):
         result = await db.execute(
             select(
                 ConversationParticipant.conversation_id,
@@ -97,17 +97,25 @@ class ConversationCache:
         for row in participants:
             conv_map[str(row.conversation_id)].append(str(row.user_id))
             user_map[str(row.user_id)].append(str(row.conversation_id))
-        
+
         async with r.pipeline() as pipe:
             for conv_id, users in conv_map.items():
                 conv_key = RedisKeys.conversation_members(conv_id)
                 pipe.delete(conv_key)
-                pipe.sadd(conv_key,*users)
+                pipe.sadd(conv_key, *users)
+
             for user_id, convs in user_map.items():
                 user_key = RedisKeys.user_conversations(user_id)
                 pipe.delete(user_key)
-                pipe.sadd(user_key,*convs)
+                pipe.sadd(user_key, *convs)
+
             await pipe.execute()
+
+        return {
+            "conversations_synced": len(conv_map),
+            "users_synced": len(user_map),
+            "participants_synced": len(participants),
+        }
 
 
 conversation_cache = ConversationCache()
