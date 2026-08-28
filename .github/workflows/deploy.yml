@@ -1,0 +1,44 @@
+name: Deploy Fieldchat Backend to OCI
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy to Oracle Cloud Infrastructure (OCI)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.OCI_HOST }}
+          username: ${{ secrets.OCI_USERNAME }}
+          key: ${{ secrets.OCI_SSH_KEY }}
+          script: |
+            set -e
+            echo "🚀 Starting deployment..."
+
+            # Navigate to backend directory on VM
+            cd ~/FieldChat
+
+            # Pull latest changes from main branch
+            git pull origin main
+
+            # Run Alembic migrations in a temporary container
+            echo "📦 Running database migrations..."
+            docker compose -f docker-compose.prod.yaml run --rm alembic
+
+            # Rebuild and restart production containers
+            echo "🔄 Restarting containers..."
+            docker compose -f docker-compose.prod.yaml up -d --build
+
+            # Clean up dangling build images
+            docker image prune -f
+
+            echo "✅ Deployment completed successfully!"
