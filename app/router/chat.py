@@ -436,7 +436,7 @@ async def remove_member(
     }
     
 
-@router.post('create-dm')
+@router.post('/create-dm')
 async def create_dm(db:DBSession,target_id:str,token:str=Depends(oauth2_scheme)):
     token_user = await user_service.get_current_user(db,token)
     if(target_id == token_user.id):
@@ -782,6 +782,67 @@ async def delete_group(group_id:str,db:DBSession,token:str = Depends(oauth2_sche
     await db.commit()
     return {"message": "Group deleted successfully"}
     
+@router.delete("/delete-dm")
+async def delete_dm(
+    dm_id: str,
+    db: DBSession,
+    token: str = Depends(oauth2_scheme),
+):
+    token_user = await user_service.get_current_user(db, token)
+
+    try:
+        dm_uuid = UUID(dm_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid DM ID"
+        )
+
+    # Find the DM
+    dm = await db.scalar(
+        select(Conversation).where(
+            Conversation.id == dm_uuid,
+            Conversation.type == ConversationType.PERSONAL,
+        )
+    )
+
+    if not dm:
+        raise HTTPException(
+            status_code=404,
+            detail="DM not found"
+        )
+
+    # Make sure current user is a participant
+    participant = await db.scalar(
+        select(ConversationParticipant).where(
+            ConversationParticipant.conversation_id == dm_uuid,
+            ConversationParticipant.user_id == token_user.id,
+        )
+    )
+
+    if not participant:
+        raise HTTPException(
+            status_code=403,
+            detail="You're not part of this DM"
+        )
+
+    # Delete participants first
+    await db.execute(
+        delete(ConversationParticipant).where(
+            ConversationParticipant.conversation_id == dm_uuid
+        )
+    )
+
+    # Delete the conversation itself
+    await db.delete(dm)
+
+    await db.commit()
+
+    return {
+        "message": "DM deleted successfully",
+        "dm_id": str(dm_uuid),
+    }
+
 from sqlalchemy import or_, select
 from app.models.profile.profile import UserProfile
 
