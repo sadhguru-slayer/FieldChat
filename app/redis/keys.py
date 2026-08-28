@@ -48,3 +48,16 @@ class RedisKeys:
     @staticmethod
     def last_seen(user_id:str)->str:
         return f"presence:last_seen:{user_id}"
+
+    """
+    ========
+    Notifications
+    ========
+    """
+    @staticmethod
+    def notification_channel(user_id: str) -> str:
+        return f"notification:{user_id}"
+
+    @staticmethod
+    def notifications_global() -> str:
+        return "notifications:global"

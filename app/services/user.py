@@ -53,14 +53,18 @@ class UserService:
 
     @classmethod
     async def get_current_user_ws(cls, db, token: str):
-        payload = token_manager.decode_token(token)
-        if not payload:
+        try:
+            payload = token_manager.decode_token(token)
+            if not payload or payload.get("type") != "access":
+                return None
+            user_id = payload.get("sub")
+            if not user_id:
+                return None
+            stmt = select(User).where(User.id == UUID(user_id))
+            result = await db.execute(stmt)
+            return result.scalar_one_or_none()
+        except Exception as e:
+            print(f"[WS AUTH ERROR] {e}", flush=True)
             return None
-        user_id = payload.get("sub")
-        if not user_id:
-            return None
-        stmt = select(User).where(User.id == UUID(user_id))
-        result = await db.execute(stmt)
-        return result.scalar_one_or_none()
 
 user_service = UserService()

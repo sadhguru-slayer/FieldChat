@@ -88,6 +88,7 @@ class Message(UUIDMixin,Base):
 
     delete_states = relationship(
         "MessageDeleteState",
+        back_populates="message",
         cascade="all, delete-orphan"
     )
 
@@ -134,7 +135,7 @@ class MessageDeleteState(UUIDMixin,Base):
     )
 
     # Relationships
-    message = relationship("Message")
+    message = relationship("Message", back_populates="delete_states")
     user = relationship("User")
     __table_args__ = (
         UniqueConstraint(

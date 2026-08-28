@@ -5,13 +5,19 @@ from app.services.cache_management.presence import presence_cache
 from app.ws.manager import manager
 
 async def handle_presence(payload: dict):
-    target_user_id = payload["user_id"]
+    target_user_id = str(payload.get("user_id", ""))
 
     watchers = await presence_cache.watchers(target_user_id)
-
+    notified = set()
     for watcher in watchers:
         watcher_id = watcher.decode() if isinstance(watcher, bytes) else str(watcher)
         await manager.send_to_user(watcher_id, payload)
+        notified.add(watcher_id)
+
+    for user_id in list(manager.users.keys()):
+        uid_str = str(user_id)
+        if uid_str not in notified:
+            await manager.send_to_user(uid_str, payload)
 
 async def conversation_handler(channel:str, data:dict):
     conversation_id = channel.split(":")[1]
@@ -22,3 +28,11 @@ async def conversation_handler(channel:str, data:dict):
 async def user_handler(channel:str, data:dict):
     user_id = channel.split(":")[1]
     await manager.send_to_user(user_id,data)
+
+async def notification_handler(channel: str, data: dict):
+    if channel.startswith("notification:"):
+        user_id = channel.split(":")[1]
+        await manager.send_to_user(user_id, data)
+    elif channel == "notifications:global":
+        for user_id in list(manager.users.keys()):
+            await manager.send_to_user(str(user_id), data)

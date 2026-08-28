@@ -52,7 +52,7 @@ async def web_socket_endpoint(
     try:
         while True:
             data = await ws.receive_json()
-            # print(data)
+            #print("[WS RECV]", data, flush=True)
             event = data.get("event")
             conversation_id = data.get("conversation_id")
             message_id = data.get("message_id") or None
@@ -137,6 +137,7 @@ async def web_socket_endpoint(
 
             elif event == "conversation.joined":
                 conversation_id = data.get("conversation_id")
+                #print("[WS JOIN]", conversation_id, "------------", flush=True)
                 if not conversation_id:
                     continue
 

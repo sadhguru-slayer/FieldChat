@@ -18,6 +18,9 @@ from app.redis.keys import RedisKeys
 from app.dependencies import DBSession
 from app.services.cache_management.conversation import conversation_cache 
 from app.schema.chat.message import MessageEventPayload
+from uuid import UUID
+from app.models.notification import NotificationType
+from app.services.notification_service import notification_service
 from dataclasses import dataclass
 from typing import Generic, Optional, TypeVar
 
@@ -222,6 +225,29 @@ class MessageService:
             RedisKeys.conversation_key(str(conversation_id)),
             event_payload.model_dump_json(),
         )
+
+        try:
+            stmt = select(ConversationParticipant.user_id).where(
+                ConversationParticipant.conversation_id == UUID(str(conversation_id)),
+                ConversationParticipant.user_id != user.id,
+            )
+            other_members = (await self.db.execute(stmt)).scalars().all()
+            for member_id in other_members:
+                await notification_service.send_notification(
+                    db=self.db,
+                    user_id=member_id,
+                    title=f"New message from {user.username}",
+                    body=content[:100] + ("..." if len(content) > 100 else ""),
+                    type=NotificationType.MESSAGE,
+                    data={
+                        "conversation_id": str(conversation_id),
+                        "message_id": str(db_message.id),
+                        "sender_id": str(user.id),
+                        "username": user.username,
+                    },
+                )
+        except Exception as e:
+            print(f"[Notification Error] Failed to send message notification: {e}")
 
         return ServiceResult(
             success=True,
