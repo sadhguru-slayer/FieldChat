@@ -9,7 +9,9 @@ from app.models.chat.conversations import Conversation,ConversationType
 from app.models.chat.participants import ConversationParticipant,ParticipantRole
 from app.models.chat.messages import Message,MessageType,MessageDeleteState,MessageReceipt
 from app.models.auth.user import User, UserRole
-from sqlalchemy import select,func
+from sqlalchemy import or_, select, delete,func
+from app.models.profile.profile import UserProfile
+
 
 from uuid import UUID
 
@@ -842,9 +844,6 @@ async def delete_dm(
         "message": "DM deleted successfully",
         "dm_id": str(dm_uuid),
     }
-
-from sqlalchemy import or_, select
-from app.models.profile.profile import UserProfile
 
 @router.post("/sync-conversations")
 async def sync_conversations(
