@@ -66,7 +66,7 @@ class ConversationCache:
             select(ConversationParticipant.user_id)
             .where(ConversationParticipant.conversation_id == UUID(conversation_id))
         )
-        user_ids = scalars.all()
+        user_ids = [str(user_id) for user_id in scalars.all()]
         conv_key = RedisKeys.conversation_members(conversation_id)
         async with r.pipeline() as pipe:
             pipe.delete(conv_key)
