@@ -493,7 +493,7 @@ async def create_dm(db:DBSession,target_id:str,token:str=Depends(oauth2_scheme))
 
     await db.commit()
     await conversation_cache.sync_conversation(
-        dm.id,
+        str(dm.id),
         db
     )
     return {
