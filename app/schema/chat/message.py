@@ -10,6 +10,7 @@ class MessageEventPayload(BaseModel):
     sender_id: str | None = None
     user_id: str | None = None
     username: str | None = None
+    display_name:str | None = None
     message: str | None = None
     timestamp: str | None = None
     edited_at: str | None = None

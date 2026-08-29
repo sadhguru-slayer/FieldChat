@@ -46,6 +46,7 @@ class MessageService:
         sender_id=None,
         user_id=None,
         username=None,
+        display_name=None,
         message=None,
         timestamp=None,
         edited_at=None,
@@ -60,6 +61,7 @@ class MessageService:
             sender_id=str(sender_id) if sender_id else None,
             user_id=str(user_id) if user_id else None,
             username=username,
+            display_name=display_name,
             message=message,
             timestamp=(
                 timestamp.astimezone(timezone.utc).isoformat()
@@ -216,6 +218,7 @@ class MessageService:
             conversation_id,
             sender_id=user.id,
             username=user.username,
+            display_name=user.profile.display_name if user.profile else None,
             message=content,
             timestamp=db_message.timestamp,
             reply_to=reply_preview,
@@ -315,6 +318,7 @@ class MessageService:
             conversation_id,
             sender_id=user.id,
             username=user.username,
+            display_name=user.profile.display_name if user.profile else None,
             message=content,
             timestamp=message.timestamp,
             edited_at=message.edited_at,

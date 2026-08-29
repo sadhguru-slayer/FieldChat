@@ -1,4 +1,5 @@
 from app.models.auth.user import User
+from app.models.profile.profile import UserProfile
 from fastapi import HTTPException
 from sqlalchemy import select
 from app.core.security.auth import token_manager
@@ -60,7 +61,11 @@ class UserService:
             user_id = payload.get("sub")
             if not user_id:
                 return None
-            stmt = select(User).where(User.id == UUID(user_id))
+            stmt = (
+                select(User)
+                .options(selectinload(User.profile))
+                .where(User.id == UUID(user_id))
+            )
             result = await db.execute(stmt)
             return result.scalar_one_or_none()
         except Exception as e:
