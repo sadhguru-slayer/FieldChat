@@ -11,7 +11,7 @@ from sqlalchemy import select,func,outerjoin,and_,exists
 from sqlalchemy.orm import selectinload
 from datetime import timezone
 from app.services.messages import MessageService
-
+from app.models.user_profile import UserProfile
 
 from uuid import UUID
 
@@ -43,7 +43,10 @@ async def get_messages(
     try:
         conversation_uuid = UUID(conversation_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid conversation ID")
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid conversation ID",
+        )
 
     conversation = (
         await db.execute(
@@ -54,12 +57,16 @@ async def get_messages(
     ).scalar_one_or_none()
 
     if not conversation:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Conversation not found",
+        )
 
     result = await db.execute(
         select(
             Message,
             User.username,
+            UserProfile.display_name,
             MessageDeleteState.user_id.label("is_deleted_for_me"),
             exists(
                 select(1).where(
@@ -80,7 +87,14 @@ async def get_messages(
                 )
             ).label("is_read"),
         )
-        .outerjoin(User, User.id == Message.sender_id)
+        .outerjoin(
+            User,
+            User.id == Message.sender_id,
+        )
+        .outerjoin(
+            UserProfile,
+            UserProfile.user_id == User.id,
+        )
         .outerjoin(
             MessageDeleteState,
             and_(
@@ -90,62 +104,94 @@ async def get_messages(
         )
         .options(
             selectinload(Message.reactions),
-            selectinload(Message.reply_to).selectinload(Message.sender),
-            selectinload(Message.reply_to).selectinload(Message.delete_states),
+            selectinload(Message.reply_to)
+            .selectinload(Message.sender)
+            .selectinload(User.profile),
+            selectinload(Message.reply_to)
+            .selectinload(Message.delete_states),
         )
-        .where(Message.conversation_id == conversation_uuid)
-        .order_by(Message.timestamp.asc())
+        .where(
+            Message.conversation_id == conversation_uuid
+        )
+        .order_by(
+            Message.timestamp.asc()
+        )
         .limit(150)
     )
 
     rows = result.all()
     events = []
 
-    # print(conversation.type,"CONV TYPE-----------------------")
-    for message, username, is_deleted_for_me, delivered, read in rows:
-        # print(delivered,"D-----------------------")
-        # # print(read,"R-----------------------")
+    # print(conversation.type, "CONV TYPE-----------------------")
+    for (
+        message,
+        username,
+        display_name,
+        is_deleted_for_me,
+        delivered,
+        read,
+    ) in rows:
+        # print(delivered, "D-----------------------")
+        # print(read, "R-----------------------")
+
         if conversation.type == ConversationType.GROUP:
             read = False
 
         if is_deleted_for_me:
-            events.append({
-                "event": MessageEvent.MESSAGE_DELETED_FOR_ME,
-                "data": {"message_id": str(message.id)},
-            })
+            events.append(
+                {
+                    "event": MessageEvent.MESSAGE_DELETED_FOR_ME,
+                    "data": {
+                        "message_id": str(message.id),
+                    },
+                }
+            )
             continue
 
         if message.is_deleted_global:
-            events.append({
-                "event": MessageEvent.MESSAGE_DELETED_FOR_EVERYONE,
-                "data": {
-                    "message_id": str(message.id),
-                    "sender_id": (
-                        str(message.sender_id)
-                        if message.type != MessageType.SYSTEM
-                        else "SYSTEM"
-                    ),
-                    "username": (
-                        username
-                        if username and message.type != MessageType.SYSTEM
-                        else "SYSTEM"
-                    ),
-                    "message": "Deleted for everyone",
-                    "timestamp": (
-                        message.timestamp.astimezone(timezone.utc).isoformat()
-                        if message.timestamp
-                        else None
-                    ),
-                    "type": message.type.value,
-                },
-            })
+            events.append(
+                {
+                    "event": MessageEvent.MESSAGE_DELETED_FOR_EVERYONE,
+                    "data": {
+                        "message_id": str(message.id),
+                        "sender_id": (
+                            str(message.sender_id)
+                            if message.type != MessageType.SYSTEM
+                            else "SYSTEM"
+                        ),
+                        "username": (
+                            username
+                            if username
+                            and message.type != MessageType.SYSTEM
+                            else "SYSTEM"
+                        ),
+                        "display_name": (
+                            display_name
+                            if display_name
+                            and message.type != MessageType.SYSTEM
+                            else "SYSTEM"
+                        ),
+                        "message": "Deleted for everyone",
+                        "timestamp": (
+                            message.timestamp
+                            .astimezone(timezone.utc)
+                            .isoformat()
+                            if message.timestamp
+                            else None
+                        ),
+                        "type": message.type.value,
+                    },
+                }
+            )
             continue
 
         is_mine = message.sender_id == token_user.id
 
         reply_to = None
+
         if message.reply_to:
             reply = message.reply_to
+
             reply_deleted_for_me = any(
                 state.user_id == token_user.id
                 for state in reply.delete_states
@@ -155,9 +201,11 @@ async def get_messages(
                 reply_to = {
                     "message_id": str(reply.id),
                     "is_deleted": True,
-                    "message": "Deleted for everyone"
-                    if reply.is_deleted_global
-                    else "Message unavailable",
+                    "message": (
+                        "Deleted for everyone"
+                        if reply.is_deleted_global
+                        else "Message unavailable"
+                    ),
                 }
             else:
                 reply_to = {
@@ -169,12 +217,32 @@ async def get_messages(
                     ),
                     "username": (
                         reply.sender.username
-                        if reply.sender and reply.type != MessageType.SYSTEM
+                        if reply.sender
+                        and reply.type != MessageType.SYSTEM
                         else "SYSTEM"
+                    ),
+                    "display_name": (
+                        reply.sender.profile.display_name
+                        if (
+                            reply.sender
+                            and reply.sender.profile
+                            and reply.sender.profile.display_name
+                            and reply.type != MessageType.SYSTEM
+                        )
+                        else (
+                            reply.sender.username
+                            if (
+                                reply.sender
+                                and reply.type != MessageType.SYSTEM
+                            )
+                            else "SYSTEM"
+                        )
                     ),
                     "message": reply.message,
                     "timestamp": (
-                        reply.timestamp.astimezone(timezone.utc).isoformat()
+                        reply.timestamp
+                        .astimezone(timezone.utc)
+                        .isoformat()
                         if reply.timestamp
                         else None
                     ),
@@ -183,6 +251,7 @@ async def get_messages(
                 }
 
         reaction_map = {}
+
         for reaction in message.reactions:
             if reaction.reaction not in reaction_map:
                 reaction_map[reaction.reaction] = {
@@ -190,9 +259,13 @@ async def get_messages(
                     "count": 0,
                     "reacted_by_me": False,
                 }
+
             reaction_map[reaction.reaction]["count"] += 1
+
             if reaction.user_id == token_user.id:
-                reaction_map[reaction.reaction]["reacted_by_me"] = True
+                reaction_map[reaction.reaction][
+                    "reacted_by_me"
+                ] = True
 
         data = {
             "is_mine": is_mine,
@@ -204,17 +277,28 @@ async def get_messages(
             ),
             "username": (
                 username
-                if username and message.type != MessageType.SYSTEM
+                if username
+                and message.type != MessageType.SYSTEM
+                else "SYSTEM"
+            ),
+            "display_name": (
+                display_name
+                if display_name
+                and message.type != MessageType.SYSTEM
                 else "SYSTEM"
             ),
             "message": message.message,
             "timestamp": (
-                message.timestamp.astimezone(timezone.utc).isoformat()
+                message.timestamp
+                .astimezone(timezone.utc)
+                .isoformat()
                 if message.timestamp
                 else None
             ),
             "edited_at": (
-                message.edited_at.astimezone(timezone.utc).isoformat()
+                message.edited_at
+                .astimezone(timezone.utc)
+                .isoformat()
                 if message.edited_at
                 else None
             ),
@@ -225,14 +309,19 @@ async def get_messages(
             "reactions": list(reaction_map.values()),
         }
 
-        events.append({
-            "event": (
-                MessageEvent.MESSAGE_EDITED
-                if message.edited_at and message.edited_at > message.timestamp
-                else MessageEvent.MESSAGE_CREATED
-            ),
-            "data": data,
-        })
+        events.append(
+            {
+                "event": (
+                    MessageEvent.MESSAGE_EDITED
+                    if (
+                        message.edited_at
+                        and message.edited_at > message.timestamp
+                    )
+                    else MessageEvent.MESSAGE_CREATED
+                ),
+                "data": data,
+            }
+        )
 
     return events
 
