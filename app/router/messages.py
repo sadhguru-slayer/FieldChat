@@ -9,7 +9,7 @@ from app.models.chat.messages import Message,MessageType,MessageDeleteState,Mess
 from app.models.auth.user import User, UserRole
 from sqlalchemy import select,func,outerjoin,and_,exists
 from sqlalchemy.orm import selectinload
-from datetime import timezone
+from datetime import timezone, datetime
 from app.services.messages import MessageService
 from app.models.profile.profile import UserProfile
 
@@ -36,6 +36,7 @@ async def get_all_messages(db: DBSession):
 async def get_messages(
     conversation_id: str,
     db: DBSession,
+    cursor: str | None = None,
     token: str = Depends(oauth2_scheme),
 ):
     token_user = await user_service.get_current_user(db, token)
@@ -62,30 +63,47 @@ async def get_messages(
             detail="Conversation not found",
         )
 
-    result = await db.execute(
+    participant_count_sq = (
+        select(func.count(ConversationParticipant.user_id))
+        .where(
+            ConversationParticipant.conversation_id == conversation_uuid,
+            ConversationParticipant.user_id != token_user.id
+        )
+        .scalar_subquery()
+    )
+
+    delivered_count_sq = (
+        select(func.count(MessageReceipt.user_id))
+        .where(
+            and_(
+                MessageReceipt.message_id == Message.id,
+                MessageReceipt.user_id != token_user.id,
+                MessageReceipt.delivered_at.is_not(None),
+            )
+        )
+        .scalar_subquery()
+    )
+
+    read_count_sq = (
+        select(func.count(MessageReceipt.user_id))
+        .where(
+            and_(
+                MessageReceipt.message_id == Message.id,
+                MessageReceipt.user_id != token_user.id,
+                MessageReceipt.read_at.is_not(None),
+            )
+        )
+        .scalar_subquery()
+    )
+
+    query = (
         select(
             Message,
             User.username,
             UserProfile.display_name,
             MessageDeleteState.user_id.label("is_deleted_for_me"),
-            exists(
-                select(1).where(
-                    and_(
-                        MessageReceipt.message_id == Message.id,
-                        MessageReceipt.user_id != token_user.id,
-                        MessageReceipt.delivered_at.is_not(None),
-                    )
-                )
-            ).label("is_delivered"),
-            exists(
-                select(1).where(
-                    and_(
-                        MessageReceipt.message_id == Message.id,
-                        MessageReceipt.user_id != token_user.id,
-                        MessageReceipt.read_at.is_not(None),
-                    )
-                )
-            ).label("is_read"),
+            (delivered_count_sq >= participant_count_sq).label("is_delivered"),
+            (read_count_sq >= participant_count_sq).label("is_read"),
         )
         .outerjoin(
             User,
@@ -113,13 +131,20 @@ async def get_messages(
         .where(
             Message.conversation_id == conversation_uuid
         )
-        .order_by(
-            Message.timestamp.asc()
-        )
-        .limit(150)
     )
 
+    if cursor:
+        try:
+            cursor_dt = datetime.fromisoformat(cursor.replace('Z', '+00:00'))
+            query = query.where(Message.timestamp < cursor_dt)
+        except ValueError:
+            pass
+
+    query = query.order_by(Message.timestamp.desc()).limit(50)
+    result = await db.execute(query)
+
     rows = result.all()
+    
     events = []
 
     # print(conversation.type, "CONV TYPE-----------------------")
@@ -133,9 +158,6 @@ async def get_messages(
     ) in rows:
         # print(delivered, "D-----------------------")
         # print(read, "R-----------------------")
-
-        if conversation.type == ConversationType.GROUP:
-            read = False
 
         if is_deleted_for_me:
             events.append(
