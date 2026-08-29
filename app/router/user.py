@@ -38,7 +38,10 @@ async def get_users(
     offset: int = 0
 ):
     token_user = await user_service.get_current_user(db, token)
-    stmt = select(User).where(User.id != token_user.id)
+    stmt = select(User).where(
+        User.id != token_user.id,
+        User.role.notin_([UserRole.ADMIN, UserRole.MODERATOR])
+    )
     
     if q and q.strip():
         search_pattern = f"%{q.strip()}%"
