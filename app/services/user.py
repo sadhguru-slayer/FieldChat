@@ -2,6 +2,7 @@ from app.models.auth.user import User
 from app.models.profile.profile import UserProfile
 from fastapi import HTTPException
 from sqlalchemy import select
+rom sqlalchemy.orm import selectinload
 from app.core.security.auth import token_manager
 from uuid import UUID
 class UserService:
