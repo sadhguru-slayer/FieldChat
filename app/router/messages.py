@@ -11,7 +11,7 @@ from sqlalchemy import select,func,outerjoin,and_,exists
 from sqlalchemy.orm import selectinload
 from datetime import timezone
 from app.services.messages import MessageService
-from app.models.user_profile import UserProfile
+from app.models.profile.profile import UserProfile
 
 from uuid import UUID
 
