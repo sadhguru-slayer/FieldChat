@@ -17,4 +17,4 @@ jobs:
           key: ${{ secrets.OCI_SSH_KEY }}
           script: |
             cd ~/FieldChat
-            docker compose -f docker-compose.prod.yaml logs --tail=200
+            docker compose -f docker-compose.prod.yaml logs --tail=300 backend
