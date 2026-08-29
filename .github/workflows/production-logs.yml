@@ -1,0 +1,20 @@
+name: View FieldChat Production Logs
+
+on:
+  workflow_dispatch:
+
+jobs:
+  logs:
+    name: Show production logs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Get production logs
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.OCI_HOST }}
+          username: ${{ secrets.OCI_USERNAME }}
+          key: ${{ secrets.OCI_SSH_KEY }}
+          script: |
+            cd ~/FieldChat
+            docker compose -f docker-compose.prod.yaml logs --tail=200
