@@ -19,6 +19,7 @@ from app.database import init_db, SessionLocal
 from app.services.cache_management.conversation import conversation_cache
 from app.redis.subscribers import start_redis_listener
 import asyncio
+import os
 
 from app.database import init_db
 @asynccontextmanager
@@ -43,9 +44,14 @@ async def lifespan(app:FastAPI):
     yield
     listener_task.cancel()
 
+is_production = os.getenv("ENVIRONMENT") == "production"
+
 app = FastAPI(
     title="Chat-Application",
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url=None if is_production else "/docs",
+    redoc_url=None if is_production else "/redoc",
+    openapi_url=None if is_production else "/openapi.json",
 )
 
 app.add_middleware(
