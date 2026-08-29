@@ -5,6 +5,7 @@ from fastapi import WebSocket
 from app.redis_client import r
 from app.redis.keys import RedisKeys
 from app.services.cache_management.presence import presence_cache
+from app.services.cache_management.active_users import active_users_cache
 
 import json
 import time
@@ -17,6 +18,7 @@ class Connection:
 	connection_id:str
 	joined_conversation:set[int] = field(default_factory=set)
 	watched_users:set[int] = field(default_factory=set)
+	active_conv_id: str | None = None
 
 class ConnectionManager:
 	def __init__(self):
@@ -97,6 +99,15 @@ class ConnectionManager:
 		if not disconnected:
 			return
 
+		# Cleanup Redis conversation active_users set
+		if disconnected.active_conv_id:
+			still_viewing = False
+			for conn in self.users.get(user_id, []):
+				if conn.active_conv_id == disconnected.active_conv_id:
+					still_viewing = True
+					break
+			if not still_viewing:
+				await active_users_cache.remove_active_user(disconnected.active_conv_id, str(user_id))
 
 		for conv_id in list(disconnected.joined_conversation):
 			self.local_conversations[conv_id].discard(user_id)

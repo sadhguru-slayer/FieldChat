@@ -9,6 +9,7 @@ from app.services.messages import MessageService
 from app.ws.manager import manager
 from app.services.cache_management.conversation import conversation_cache
 from app.services.cache_management.presence import presence_cache
+from app.services.cache_management.active_users import active_users_cache
 from app.redis_client import r
 from app.models.chat.messages import Message, MessageEvent
 from app.models.chat.conversations import Conversation, ConversationType
@@ -141,6 +142,13 @@ async def web_socket_endpoint(
                 if not conversation_id:
                     continue
 
+                conn = manager._find_connection(str(user.id), ws)
+                if conn:
+                    if conn.active_conv_id and conn.active_conv_id != conversation_id:
+                        await active_users_cache.remove_active_user(conn.active_conv_id, str(user.id))
+                    conn.active_conv_id = conversation_id
+                    await active_users_cache.add_active_user(conversation_id, str(user.id))
+
                 await manager.join_conversation(
                     conversation_id,
                     str(user.id),
@@ -157,7 +165,6 @@ async def web_socket_endpoint(
                         )
 
                         if other_user_id:
-                            conn = manager._find_connection(str(user.id), ws)
                             if conn:
                                 conn.watched_users.add(other_user_id)
 
@@ -181,6 +188,11 @@ async def web_socket_endpoint(
                 conversation_id = data.get("conversation_id")
                 if not conversation_id:
                     continue
+
+                conn = manager._find_connection(str(user.id), ws)
+                if conn and conn.active_conv_id == conversation_id:
+                    conn.active_conv_id = None
+                    await active_users_cache.remove_active_user(conversation_id, str(user.id))
 
                 async with SessionLocal() as db:
                     conversation = await db.get(Conversation, UUID(str(conversation_id)))

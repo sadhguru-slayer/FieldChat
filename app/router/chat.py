@@ -9,13 +9,31 @@ from app.models.notification import NotificationType
 from app.redis_client import r
 from app.models.chat.conversations import Conversation,ConversationType
 from app.models.chat.participants import ConversationParticipant,ParticipantRole
-from app.models.chat.messages import Message,MessageType,MessageDeleteState,MessageReceipt
+from app.models.chat.messages import Message,MessageType,MessageDeleteState,MessageReceipt,MessageEvent
 from app.models.auth.user import User, UserRole
 from sqlalchemy import or_, select, delete,func
 from app.models.profile.profile import UserProfile
+from app.redis.keys import RedisKeys
+from app.schema.chat.message import MessageEventPayload
 
 
 from uuid import UUID
+
+async def broadcast_system_message(conversation_id, db_message: Message, sender_username: str):
+    event_payload = MessageEventPayload(
+        type="SYSTEM",
+        event=MessageEvent.MESSAGE_CREATED,
+        message_id=str(db_message.id),
+        conversation_id=str(conversation_id),
+        sender_id=str(db_message.sender_id) if db_message.sender_id else None,
+        username=sender_username,
+        message=db_message.message,
+        timestamp=db_message.created_at.isoformat() if db_message.created_at else None,
+    )
+    await r.publish(
+        RedisKeys.conversation_key(str(conversation_id)),
+        event_payload.model_dump_json(),
+    )
 
 router = APIRouter(
     prefix="/api/chat",
@@ -91,7 +109,7 @@ async def create_coversation(form_data:CreateConversation,db:DBSession,token:str
                     type=NotificationType.SYSTEM,
                     data={
                         "conversation_id": str(conversation.id),
-                        "action": "ADDED_TO_GROUP",
+                        "sub_event": "conversation.added",
                         "username": token_user.username,
                         "group_name": conversation.name or "Group",
                     }
@@ -341,6 +359,12 @@ async def add_member(
         db.add_all(system_messages)
         await db.commit()
         await conversation_cache.add_members(group_id,[str(p.user_id) for p in new_participants])
+
+        for msg in system_messages:
+            try:
+                await broadcast_system_message(group_id, msg, token_user.username)
+            except Exception as e:
+                print(f"Failed to broadcast add member system message: {e}")
         
         for p in new_participants:
             try:
@@ -352,7 +376,7 @@ async def add_member(
                     type=NotificationType.SYSTEM,
                     data={
                         "conversation_id": str(conversation.id),
-                        "action": "ADDED_TO_GROUP",
+                        "sub_event": "conversation.added",
                         "username": token_user.username,
                         "group_name": conversation.name or "Group",
                     }
@@ -460,17 +484,21 @@ async def remove_member(
 
     await db.delete(target_participant)
 
-    db.add(
-        Message(
-            conversation_id=group_id,
-            sender_id=token_user.id,
-            type=MessageType.SYSTEM,
-            message=f"{token_user.username} removed {target_participant.user.username}",
-        )
+    msg_obj = Message(
+        conversation_id=group_id,
+        sender_id=token_user.id,
+        type=MessageType.SYSTEM,
+        message=f"{token_user.username} removed {target_participant.user.username}",
     )
+    db.add(msg_obj)
 
     await db.commit()
     await conversation_cache.remove_member(str(group_id),str(target_id))
+
+    try:
+        await broadcast_system_message(group_id, msg_obj, token_user.username)
+    except Exception as e:
+        print(f"Failed to broadcast remove member system message: {e}")
 
     try:
         group_obj = await db.get(Conversation, group_id)
@@ -483,7 +511,7 @@ async def remove_member(
             type=NotificationType.SYSTEM,
             data={
                 "conversation_id": str(group_id),
-                "action": "REMOVED_FROM_GROUP",
+                "sub_event": "conversation.removed",
                 "username": token_user.username,
                 "group_name": group_name,
             }

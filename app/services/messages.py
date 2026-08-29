@@ -17,6 +17,7 @@ from app.redis_client import r
 from app.redis.keys import RedisKeys
 from app.dependencies import DBSession
 from app.services.cache_management.conversation import conversation_cache 
+from app.services.cache_management.active_users import active_users_cache
 from app.schema.chat.message import MessageEventPayload
 from uuid import UUID
 from app.models.notification import NotificationType
@@ -236,6 +237,10 @@ class MessageService:
             )
             other_members = (await self.db.execute(stmt)).scalars().all()
             for member_id in other_members:
+                # Do not send notifications to users actively viewing this conversation
+                if await active_users_cache.is_user_active(str(conversation_id), str(member_id)):
+                    continue
+
                 await notification_service.send_notification(
                     db=self.db,
                     user_id=member_id,
