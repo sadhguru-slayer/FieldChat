@@ -1,4 +1,4 @@
-from fastapi import APIRouter,HTTPException
+from fastapi import APIRouter,HTTPException, Depends
 from app.dependencies import DBSession
 from sqlalchemy import select
 from app.schema.auth.user import UserResponse, UserRegister
@@ -19,10 +19,36 @@ async def get_user_with_email(db:DBSession,email:str):
         raise HTTPException(404,"User not found")
     return user
 
-@router.get('/get_users',response_model=list[UserResponse])
-async def get_users(db:DBSession):
+from typing import Optional
+from app.core.security.auth import oauth2_scheme
+
+@router.get('/get_users_free',response_model=list[UserResponse])
+async def get_users_free(db:DBSession):
     stmp = select(User)
     result = await db.execute(stmp)
+    users = result.scalars().all()
+    return users
+
+@router.get('/get_users', response_model=list[UserResponse])
+async def get_users(
+    db: DBSession,
+    token: str = Depends(oauth2_scheme),
+    q: Optional[str] = None,
+    limit: int = 20,
+    offset: int = 0
+):
+    token_user = await user_service.get_current_user(db, token)
+    stmt = select(User).where(User.id != token_user.id)
+    
+    if q and q.strip():
+        search_pattern = f"%{q.strip()}%"
+        stmt = stmt.where(
+            (User.username.ilike(search_pattern)) | 
+            (User.email.ilike(search_pattern))
+        )
+    
+    stmt = stmt.offset(offset).limit(limit)
+    result = await db.execute(stmt)
     users = result.scalars().all()
     return users
 
