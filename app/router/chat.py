@@ -562,7 +562,7 @@ async def create_dm(db:DBSession,target_id:str,token:str=Depends(oauth2_scheme))
 def build_latest_message(
     message,
     username,
-    display_name,
+    display_name=None,
     delete_state,
     receipt,
     current_user_id,
