@@ -710,24 +710,30 @@ async def get_user_groups(db:DBSession,token:str = Depends(oauth2_scheme)):
 
 
 
-@router.get('/get-user-dms')
-async def get_user_dms(db:DBSession,token:str=Depends(oauth2_scheme)):
-    token_user = await user_service.get_current_user(db,token)
+@router.get("/get-user-dms")
+async def get_user_dms(
+    db: DBSession,
+    token: str = Depends(oauth2_scheme),
+):
+    token_user = await user_service.get_current_user(db, token)
 
     latest_message_subquery = (
         select(
-            Message.conversation_id, 
-            func.max(Message.timestamp).label("latest_time")
+            Message.conversation_id,
+            func.max(Message.timestamp).label("latest_time"),
         )
         .group_by(Message.conversation_id)
         .subquery()
     )
+
     message_sender = aliased(User)
+
     stmt = (
         select(
             Conversation,
             User.id.label("other_user_id"),
             User.username,
+            UserProfile.display_name,
             Message,
             MessageDeleteState,
             MessageReceipt,
@@ -736,45 +742,55 @@ async def get_user_dms(db:DBSession,token:str=Depends(oauth2_scheme)):
         )
         .join(
             ConversationParticipant,
-            ConversationParticipant.conversation_id == Conversation.id
+            ConversationParticipant.conversation_id == Conversation.id,
         )
         .join(
             User,
-            User.id == ConversationParticipant.user_id
+            User.id == ConversationParticipant.user_id,
+        )
+        .outerjoin(
+            UserProfile,
+            UserProfile.user_id == User.id,
         )
         .outerjoin(
             latest_message_subquery,
-            latest_message_subquery.c.conversation_id == Conversation.id
+            latest_message_subquery.c.conversation_id
+            == Conversation.id,
         )
         .outerjoin(
             Message,
-            (Message.conversation_id == Conversation.id) &
-            (Message.timestamp == latest_message_subquery.c.latest_time)
+            (Message.conversation_id == Conversation.id)
+            & (
+                Message.timestamp
+                == latest_message_subquery.c.latest_time
+            ),
         )
         .outerjoin(
             MessageDeleteState,
             (MessageDeleteState.message_id == Message.id)
-            & (MessageDeleteState.user_id == token_user.id)
+            & (MessageDeleteState.user_id == token_user.id),
         )
         .outerjoin(
             MessageReceipt,
             (MessageReceipt.message_id == Message.id)
-            & (MessageReceipt.user_id == token_user.id)
+            & (MessageReceipt.user_id == token_user.id),
         )
         .outerjoin(
             message_sender,
-            message_sender.id == Message.sender_id
+            message_sender.id == Message.sender_id,
         )
         .where(
             Conversation.type == ConversationType.PERSONAL,
             Conversation.is_deleted == False,
             Conversation.id.in_(
-                select(ConversationParticipant.conversation_id)
-                .where(
-                    ConversationParticipant.user_id == token_user.id
+                select(
+                    ConversationParticipant.conversation_id
+                ).where(
+                    ConversationParticipant.user_id
+                    == token_user.id
                 )
             ),
-            ConversationParticipant.user_id != token_user.id
+            ConversationParticipant.user_id != token_user.id,
         )
     )
 
@@ -785,36 +801,75 @@ async def get_user_dms(db:DBSession,token:str=Depends(oauth2_scheme)):
     # Batch-check presence: one Redis call instead of N calls per row
     online_users: set = await r.smembers("online_users")
 
-    # Batch-fetch last_seen for all other users using a pipeline (1 round-trip)
+    # Batch-fetch last_seen for all other users using a pipeline
     from app.redis.keys import RedisKeys as RK
-    other_ids = [str(row[1]) if row[1] else None for row in rows]
+
+    other_ids = [
+        str(row[1]) if row[1] else None
+        for row in rows
+    ]
+
     last_seen_map: dict[str, int | None] = {}
+
     if any(other_ids):
         pipe = r.pipeline()
+
         for uid in other_ids:
             if uid:
                 pipe.get(RK.last_seen(uid))
             else:
                 pipe.get("__null__")
+
         results_ls = await pipe.execute()
+
         for uid, val in zip(other_ids, results_ls):
             if uid:
-                last_seen_map[uid] = int(val) if val is not None else None
+                last_seen_map[uid] = (
+                    int(val) if val is not None else None
+                )
 
-    return [{
-        "id": conversation.id, "name": username, "type": conversation.type.value,
-        "other_user_id": str(other_user_id) if other_user_id else None,
-        "is_online": str(other_user_id) in online_users if other_user_id else False,
-        "last_seen": last_seen_map.get(str(other_user_id)) if other_user_id else None,
-        "latest_message": build_latest_message(
+    return [
+        {
+            "id": conversation.id,
+            "name": username,
+            "display_name": display_name,
+            "type": conversation.type.value,
+            "other_user_id": (
+                str(other_user_id)
+                if other_user_id
+                else None
+            ),
+            "is_online": (
+                str(other_user_id) in online_users
+                if other_user_id
+                else False
+            ),
+            "last_seen": (
+                last_seen_map.get(str(other_user_id))
+                if other_user_id
+                else None
+            ),
+            "latest_message": build_latest_message(
                 message=message,
                 username=latest_sender,
                 delete_state=delete_state,
                 receipt=receipt,
                 current_user_id=token_user.id,
                 is_group=False,
-        ),
-    } for conversation, other_user_id, username, message, delete_state, receipt, latest_sender_id, latest_sender in rows]
+            ),
+        }
+        for (
+            conversation,
+            other_user_id,
+            username,
+            display_name,
+            message,
+            delete_state,
+            receipt,
+            latest_sender_id,
+            latest_sender,
+        ) in rows
+    ]
 
 
 @router.delete('/delete-group')
