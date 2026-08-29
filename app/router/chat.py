@@ -562,6 +562,7 @@ async def create_dm(db:DBSession,target_id:str,token:str=Depends(oauth2_scheme))
 def build_latest_message(
     message,
     username,
+    display_name,
     delete_state,
     receipt,
     current_user_id,
@@ -578,12 +579,17 @@ def build_latest_message(
     elif is_group:
         sender = username.split(" ")[0] if username else None
     else:
-        sender = None
+        sender = display_name
 
     return {
         "id": str(message.id),
-        "sender_id": str(message.sender_id) if message.sender_id else None,
+        "sender_id": (
+            str(message.sender_id)
+            if message.sender_id
+            else None
+        ),
         "sender": sender,
+        "display_name": display_name,
 
         "content": (
             "Deleted for everyone"
@@ -622,6 +628,7 @@ def build_latest_message(
     }
 
 
+
 @router.get('/get-user-groups')
 async def get_user_groups(db:DBSession,token:str = Depends(oauth2_scheme)):
     token_user = await user_service.get_current_user(db,token)
@@ -648,6 +655,7 @@ async def get_user_groups(db:DBSession,token:str = Depends(oauth2_scheme)):
             ConversationParticipant.role,
             Message,
             User.username,
+            UserProfile.display_name,
             MessageDeleteState,
             MessageReceipt,
             member_count_subquery.label("member_count"),
@@ -678,6 +686,10 @@ async def get_user_groups(db:DBSession,token:str = Depends(oauth2_scheme)):
             User,
             User.id == Message.sender_id
         )
+        .outerjoin(
+            UserProfile,
+            UserProfile.user_id == User.id,
+        )
         .where(
             ConversationParticipant.user_id == token_user.id,
             Conversation.type == ConversationType.GROUP,
@@ -699,13 +711,14 @@ async def get_user_groups(db:DBSession,token:str = Depends(oauth2_scheme)):
             "latest_message": build_latest_message(
                 message=message,
                 username=username,
+                display_name=display_name,
                 delete_state=delete_state,
                 receipt=receipt,
                 current_user_id=token_user.id,
                 is_group=True,
             ),
         }
-        for group, role, message, username, delete_state, receipt, member_count in groups
+        for group, role, message, username,display_name, delete_state, receipt, member_count in groups
     ]
 
 
