@@ -137,7 +137,8 @@ class NotificationService:
                         data=json.dumps(payload_data),
                         vapid_private_key=settings.VAPID_PRIVATE_KEY,
                         vapid_claims={"sub": claims_email},
-                        headers=headers
+                        headers=headers,
+                        ttl=86400
                     )
                     print(f"[DEBUG] [WebPush] Push delivered successfully to endpoint: {sub['endpoint'][:60]}...")
                     return False

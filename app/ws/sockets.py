@@ -50,6 +50,12 @@ async def web_socket_endpoint(
         await manager.join_conversation(
             conv_id, str(user.id), ws
         )
+
+    # Mark all messages sent to this user as delivered since they just came online
+    async with SessionLocal() as db:
+        service = MessageService(db)
+        await service.mark_all_undelivered_as_delivered(user)
+
     try:
         while True:
             data = await ws.receive_json()

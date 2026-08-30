@@ -743,3 +743,80 @@ class MessageService:
 
 
         return ServiceResult(success=True, data=event_payload)
+
+    async def mark_all_undelivered_as_delivered(self, user):
+        from sqlalchemy import and_, or_
+        # 1. Get all conversations the user is in
+        conversations_stmt = select(ConversationParticipant.conversation_id).where(
+            ConversationParticipant.user_id == user.id
+        )
+        conversation_ids = (await self.db.execute(conversations_stmt)).scalars().all()
+        if not conversation_ids:
+            return
+
+        # 2. Find all messages in these conversations that were:
+        #    - NOT sent by the current user
+        #    - AND have not been deleted globally
+        #    - AND do NOT already have a MessageReceipt with delivered_at for this user
+        undelivered_stmt = (
+            select(Message)
+            .outerjoin(
+                MessageReceipt,
+                and_(
+                    MessageReceipt.message_id == Message.id,
+                    MessageReceipt.user_id == user.id,
+                )
+            )
+            .where(
+                and_(
+                    Message.conversation_id.in_(conversation_ids),
+                    Message.sender_id != user.id,
+                    Message.is_deleted_global == False,
+                    or_(
+                        MessageReceipt.id.is_(None),
+                        MessageReceipt.delivered_at.is_(None)
+                    )
+                )
+            )
+        )
+        undelivered_messages = (await self.db.execute(undelivered_stmt)).scalars().all()
+        if not undelivered_messages:
+            return
+
+        now = datetime.now(timezone.utc)
+        
+        for message in undelivered_messages:
+            receipt_stmt = select(MessageReceipt).where(
+                and_(
+                    MessageReceipt.message_id == message.id,
+                    MessageReceipt.user_id == user.id,
+                )
+            )
+            receipt = (await self.db.execute(receipt_stmt)).scalar_one_or_none()
+            if not receipt:
+                receipt = MessageReceipt(
+                    message_id=message.id,
+                    user_id=user.id,
+                    delivered_at=now,
+                )
+                self.db.add(receipt)
+            else:
+                receipt.delivered_at = now
+                
+            await self.db.commit()
+            await self.db.refresh(receipt)
+
+            event_payload = self._build_event(
+                MessageEvent.MESSAGE_DELIVERED,
+                message.id,
+                message.conversation_id,
+                sender_id=message.sender_id,
+                user_id=user.id,
+                timestamp=receipt.delivered_at,
+            )
+
+            # Receipt goes to the original sender
+            await r.publish(
+                RedisKeys.user_chanel(str(message.sender_id)),
+                event_payload.model_dump_json(),
+            )
