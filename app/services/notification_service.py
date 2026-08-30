@@ -70,9 +70,12 @@ class NotificationService:
         channel = RedisKeys.notification_channel(str(user_id))
         await r.publish(channel, ws_event.model_dump_json())
 
-        # Also trigger Web Push in the background
-        import asyncio
-        asyncio.create_task(cls._trigger_web_push(user_id, json.loads(ws_event.model_dump_json())))
+        # Trigger Web Push in the background only if the user is offline (WSS disconnected)
+        from app.services.cache_management.presence import presence_cache
+        is_online = await presence_cache.online(str(user_id))
+        if not is_online:
+            import asyncio
+            asyncio.create_task(cls._trigger_web_push(user_id, json.loads(ws_event.model_dump_json())))
 
         return resp
 
