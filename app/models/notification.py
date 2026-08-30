@@ -74,3 +74,28 @@ class Notification(UUIDMixin, Base):
         "User",
         backref="notifications",
     )
+
+# Revise
+class PushSubscription(UUIDMixin, Base):
+    __tablename__ = "push_subscriptions"
+
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+
+    endpoint: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    p256dh: Mapped[str] = mapped_column(String(255), nullable=False)
+    auth: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    user: Mapped["User"] = relationship(
+        "User",
+        backref="push_subscriptions",
+    )

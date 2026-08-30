@@ -677,6 +677,22 @@ async def get_user_groups(db:DBSession,token:str = Depends(oauth2_scheme)):
         .scalar_subquery()
     )
 
+    unread_count_subquery = (
+        select(func.count(Message.id))
+        .outerjoin(
+            MessageReceipt,
+            (MessageReceipt.message_id == Message.id)
+            & (MessageReceipt.user_id == token_user.id)
+        )
+        .where(
+            Message.conversation_id == Conversation.id,
+            Message.sender_id != token_user.id,
+            MessageReceipt.read_at.is_(None)
+        )
+        .correlate(Conversation)
+        .scalar_subquery()
+    )
+
     stmt = (
         select(
             Conversation,
@@ -687,6 +703,7 @@ async def get_user_groups(db:DBSession,token:str = Depends(oauth2_scheme)):
             MessageDeleteState,
             MessageReceipt,
             member_count_subquery.label("member_count"),
+            unread_count_subquery.label("unread_count"),
         )
         .join(
             ConversationParticipant,
@@ -736,6 +753,7 @@ async def get_user_groups(db:DBSession,token:str = Depends(oauth2_scheme)):
             "type": group.type.value,
             "role": role.value,
             "member_count": member_count,
+            "unread_count": unread_count,
             "latest_message": build_latest_message(
                 message=message,
                 username=username,
@@ -746,7 +764,7 @@ async def get_user_groups(db:DBSession,token:str = Depends(oauth2_scheme)):
                 is_group=True,
             ),
         }
-        for group, role, message, username,display_name, delete_state, receipt, member_count in groups
+        for group, role, message, username, display_name, delete_state, receipt, member_count, unread_count in groups
     ]
 
 
@@ -767,6 +785,22 @@ async def get_user_dms(
         .subquery()
     )
 
+    unread_count_subquery = (
+        select(func.count(Message.id))
+        .outerjoin(
+            MessageReceipt,
+            (MessageReceipt.message_id == Message.id)
+            & (MessageReceipt.user_id == token_user.id)
+        )
+        .where(
+            Message.conversation_id == Conversation.id,
+            Message.sender_id != token_user.id,
+            MessageReceipt.read_at.is_(None)
+        )
+        .correlate(Conversation)
+        .scalar_subquery()
+    )
+
     message_sender = aliased(User)
 
     stmt = (
@@ -780,6 +814,7 @@ async def get_user_dms(
             MessageReceipt,
             message_sender.id,
             message_sender.username,
+            unread_count_subquery.label("unread_count"),
         )
         .join(
             ConversationParticipant,
@@ -890,6 +925,7 @@ async def get_user_dms(
                 if other_user_id
                 else None
             ),
+            "unread_count": unread_count,
             "latest_message": build_latest_message(
                 message=message,
                 username=latest_sender,
@@ -909,6 +945,7 @@ async def get_user_dms(
             receipt,
             latest_sender_id,
             latest_sender,
+            unread_count,
         ) in rows
     ]
 

@@ -26,7 +26,11 @@ class UserService:
         user_id = payload.get("sub")
         if not user_id:
             raise HTTPException(401, "Invalid token payload")
-        result = await db.execute(select(User).where(User.id == UUID(user_id)))
+        result = await db.execute(
+            select(User)
+            .options(selectinload(User.profile))
+            .where(User.id == UUID(user_id))
+        )
         user = result.scalar_one_or_none()
         if not user:
             raise HTTPException(401, "User not found")

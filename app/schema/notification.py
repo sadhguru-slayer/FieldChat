@@ -33,3 +33,12 @@ class SendNotificationRequest(BaseModel):
 class NotificationWSEvent(BaseModel):
     event: str = "notification"
     notification: NotificationResponse
+
+
+class PushSubscriptionKeys(BaseModel):
+    p256dh: str
+    auth: str
+
+class PushSubscriptionRequest(BaseModel):
+    endpoint: str
+    keys: PushSubscriptionKeys

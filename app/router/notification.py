@@ -109,3 +109,22 @@ async def send_notification(
             data=payload.data,
         )
         return {"message": "Global notification broadcasted successfully"}
+
+@notification_router.post("/subscribe", response_model=dict)
+async def subscribe_push(
+    payload: __import__("app.schema.notification", fromlist=["PushSubscriptionRequest"]).PushSubscriptionRequest,
+    db: DBSession,
+    token: str = Depends(oauth2_scheme),
+):
+    user = await user_service.get_current_user(db, token)
+    print(f"[DEBUG] [Router] Received push subscription request from user: {user.username} (ID: {user.id})")
+    print(f"[DEBUG] [Router] Endpoint: {payload.endpoint[:60]}...")
+    success = await notification_service.save_push_subscription(
+        db,
+        user_id=user.id,
+        endpoint=payload.endpoint,
+        p256dh=payload.keys.p256dh,
+        auth=payload.keys.auth,
+    )
+    print(f"[DEBUG] [Router] Save subscription success status: {success}")
+    return {"message": "Push subscription saved successfully", "success": success}
