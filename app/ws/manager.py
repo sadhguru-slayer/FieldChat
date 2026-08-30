@@ -36,6 +36,7 @@ class ConnectionManager:
 			)
 
 		self.users[user_id].append(conn)
+		print(f"[WS CONNECT] User: {username} (ID: {user_id}), Connection ID: {connection_id}", flush=True)
 		redis_key = RedisKeys.user_connections(user_id)
 		# redis_key = f"user:{user_id}:connections"
 
@@ -44,6 +45,7 @@ class ConnectionManager:
 			connection_id
 		)
 		count = await r.scard(redis_key)
+		print(f"[WS CONNECT] User {username} (ID: {user_id}) now has {count} active connection(s)", flush=True)
 		if count == 1:
 			await r.sadd(
 			"online_users",
@@ -123,6 +125,7 @@ class ConnectionManager:
 				disconnected.connection_id
 			)
 			remaining_count = await r.scard(redis_key)
+			print(f"[WS DISCONNECT] User ID: {user_id}, Connection ID: {disconnected.connection_id} removed. Remaining active connection(s): {remaining_count}", flush=True)
 			if remaining_count == 0:
 				await r.delete(redis_key)
 				await presence_cache.set_offline(str(user_id))

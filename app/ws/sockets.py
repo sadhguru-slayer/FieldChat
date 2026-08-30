@@ -44,12 +44,30 @@ async def web_socket_endpoint(
 
     await manager.connect(str(user.id), user.username, ws)
 
+    from app.redis.keys import RedisKeys
     conversation_ids = await conversation_cache.get_user_conversations(str(user.id))
+    conn = manager._find_connection(str(user.id), ws)
 
     for conv_id in conversation_ids:
         await manager.join_conversation(
             conv_id, str(user.id), ws
         )
+        # Watch DM participant presence to sync sidebar online/offline indicators
+        conv_id_str = str(conv_id)
+        members = await r.smembers(RedisKeys.conversation_members(conv_id_str))
+        if len(members) == 2:
+            for m in members:
+                m_str = m.decode() if isinstance(m, bytes) else str(m)
+                if m_str != str(user.id):
+                    await presence_cache.watch(
+                        watcher_id=str(user.id),
+                        target_user_id=m_str,
+                    )
+                    if conn:
+                        try:
+                            conn.watched_users.add(UUID(m_str))
+                        except Exception:
+                            conn.watched_users.add(m_str)
 
     # Mark all messages sent to this user as delivered since they just came online
     async with SessionLocal() as db:

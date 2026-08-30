@@ -35,6 +35,13 @@ async def lifespan(app:FastAPI):
     acquired = await lock.acquire()
     if acquired:
         try:
+            # Clear any zombie WebSocket connections left over from previous process runs
+            print("[Startup] Cleaning up zombie connection states in Redis...")
+            conn_keys = await r.keys("user:*:connections")
+            if conn_keys:
+                await r.delete(*conn_keys)
+            await r.delete("online_users")
+
             async with SessionLocal() as db:
                 await conversation_cache.sync_all(db)
         finally:

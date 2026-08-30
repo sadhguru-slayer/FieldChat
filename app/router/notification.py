@@ -117,8 +117,8 @@ async def subscribe_push(
     token: str = Depends(oauth2_scheme),
 ):
     user = await user_service.get_current_user(db, token)
-    print(f"[DEBUG] [Router] Received push subscription request from user: {user.username} (ID: {user.id})")
-    print(f"[DEBUG] [Router] Endpoint: {payload.endpoint[:60]}...")
+    # print(f"[DEBUG] [Router] Received push subscription request from user: {user.username} (ID: {user.id})")
+    # print(f"[DEBUG] [Router] Endpoint: {payload.endpoint[:60]}...")
     success = await notification_service.save_push_subscription(
         db,
         user_id=user.id,
@@ -126,5 +126,5 @@ async def subscribe_push(
         p256dh=payload.keys.p256dh,
         auth=payload.keys.auth,
     )
-    print(f"[DEBUG] [Router] Save subscription success status: {success}")
+    # print(f"[DEBUG] [Router] Save subscription success status: {success}")
     return {"message": "Push subscription saved successfully", "success": success}

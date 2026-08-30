@@ -8,16 +8,9 @@ async def handle_presence(payload: dict):
     target_user_id = str(payload.get("user_id", ""))
 
     watchers = await presence_cache.watchers(target_user_id)
-    notified = set()
     for watcher in watchers:
         watcher_id = watcher.decode() if isinstance(watcher, bytes) else str(watcher)
         await manager.send_to_user(watcher_id, payload)
-        notified.add(watcher_id)
-
-    for user_id in list(manager.users.keys()):
-        uid_str = str(user_id)
-        if uid_str not in notified:
-            await manager.send_to_user(uid_str, payload)
 
 async def conversation_handler(channel:str, data:dict):
     conversation_id = channel.split(":")[1]

@@ -97,10 +97,10 @@ class NotificationService:
 
         import hashlib
         pub_key_hash = hashlib.sha256(settings.VAPID_PUBLIC_KEY.encode()).hexdigest()
-        print(f"[DEBUG] [WebPush] Triggering push for user_id={user_id} with claims_email={claims_email}...")
-        print(f"[DEBUG] [WebPush] Active Private Key prefix: {settings.VAPID_PRIVATE_KEY[:10]}...")
-        print(f"[DEBUG] [WebPush] Active Public Key prefix: {settings.VAPID_PUBLIC_KEY[:10]}...")
-        print(f"[DEBUG] [WebPush] Backend VAPID public key hash: {pub_key_hash}")
+        # print(f"[DEBUG] [WebPush] Triggering push for user_id={user_id} with claims_email={claims_email}...")
+        # print(f"[DEBUG] [WebPush] Active Private Key prefix: {settings.VAPID_PRIVATE_KEY[:10]}...")
+        # print(f"[DEBUG] [WebPush] Active Public Key prefix: {settings.VAPID_PUBLIC_KEY[:10]}...")
+        # print(f"[DEBUG] [WebPush] Backend VAPID public key hash: {pub_key_hash}")
         async with SessionLocal() as db:
             stmt = select(PushSubscription).where(PushSubscription.user_id == user_id)
             result = await db.execute(stmt)
@@ -116,7 +116,7 @@ class NotificationService:
                 for sub in subscriptions
             ]
 
-        print(f"[DEBUG] [WebPush] Found {len(subs_data)} active push subscriptions for user.")
+        # print(f"[DEBUG] [WebPush] Found {len(subs_data)} active push subscriptions for user.")
 
         endpoints_to_delete = []
         for sub in subs_data:
@@ -140,12 +140,12 @@ class NotificationService:
                         headers=headers,
                         ttl=86400
                     )
-                    print(f"[DEBUG] [WebPush] Push delivered successfully to endpoint: {sub['endpoint'][:60]}...")
+                    # print(f"[DEBUG] [WebPush] Push delivered successfully to endpoint: {sub['endpoint'][:60]}...")
                     return False
                 except WebPushException as ex:
                     print(f"[WARN] [WebPush] Web push failed for {sub['endpoint'][:60]}: {repr(ex)}")
                     if ex.response is not None and ex.response.status_code in (404, 410):
-                        print(f"[DEBUG] [WebPush] Failure is permanent (Status {ex.response.status_code}). Scheduling cleanup.")
+                        # print(f"[DEBUG] [WebPush] Failure is permanent (Status {ex.response.status_code}). Scheduling cleanup.")
                         return True
                     return False
                 except Exception as ex:
@@ -157,7 +157,7 @@ class NotificationService:
                 endpoints_to_delete.append(sub["endpoint"])
 
         if endpoints_to_delete:
-            print(f"[DEBUG] [WebPush] Deleting {len(endpoints_to_delete)} stale/invalid subscriptions from database...")
+            # print(f"[DEBUG] [WebPush] Deleting {len(endpoints_to_delete)} stale/invalid subscriptions from database...")
             from sqlalchemy import delete
             async with SessionLocal() as db:
                 await db.execute(
@@ -166,7 +166,7 @@ class NotificationService:
                     )
                 )
                 await db.commit()
-            print(f"[DEBUG] [WebPush] Database cleanup finished.")
+            # print(f"[DEBUG] [WebPush] Database cleanup finished.")
 
     @classmethod
     async def broadcast_notification(
@@ -265,8 +265,8 @@ class NotificationService:
         p256dh: str,
         auth: str,
     ) -> bool:
-        print(f"[DEBUG] [Service] Saving push subscription for user_id={user_id}...")
-        print(f"[DEBUG] [Service] Subscription Keys: p256dh={p256dh[:20]}..., auth={auth[:10]}...")
+        # print(f"[DEBUG] [Service] Saving push subscription for user_id={user_id}...")
+        # print(f"[DEBUG] [Service] Subscription Keys: p256dh={p256dh[:20]}..., auth={auth[:10]}...")
         from app.models.notification import PushSubscription
         try:
             stmt = select(PushSubscription).where(PushSubscription.endpoint == endpoint)
@@ -274,12 +274,12 @@ class NotificationService:
             sub = result.scalar_one_or_none()
 
             if sub:
-                print(f"[DEBUG] [Service] Subscription endpoint exists. Updating keys and user_id...")
+                # print(f"[DEBUG] [Service] Subscription endpoint exists. Updating keys and user_id...")
                 sub.user_id = user_id
                 sub.p256dh = p256dh
                 sub.auth = auth
             else:
-                print(f"[DEBUG] [Service] New subscription endpoint. Creating new record...")
+                # print(f"[DEBUG] [Service] New subscription endpoint. Creating new record...")
                 sub = PushSubscription(
                     user_id=user_id,
                     endpoint=endpoint,
@@ -289,7 +289,7 @@ class NotificationService:
                 db.add(sub)
 
             await db.commit()
-            print(f"[DEBUG] [Service] Save transaction committed successfully in database.")
+            # print(f"[DEBUG] [Service] Save transaction committed successfully in database.")
             return True
         except Exception as e:
             print(f"[ERROR] [Service] Failed to save push subscription in database: {repr(e)}")
