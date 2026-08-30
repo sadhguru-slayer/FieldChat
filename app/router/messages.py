@@ -104,6 +104,8 @@ async def get_messages(
             MessageDeleteState.user_id.label("is_deleted_for_me"),
             (delivered_count_sq >= participant_count_sq).label("is_delivered"),
             (read_count_sq >= participant_count_sq).label("is_read"),
+            MessageReceipt.delivered_at.label("my_delivered_at"),
+            MessageReceipt.read_at.label("my_read_at"),
         )
         .outerjoin(
             User,
@@ -118,6 +120,13 @@ async def get_messages(
             and_(
                 MessageDeleteState.message_id == Message.id,
                 MessageDeleteState.user_id == token_user.id,
+            ),
+        )
+        .outerjoin(
+            MessageReceipt,
+            and_(
+                MessageReceipt.message_id == Message.id,
+                MessageReceipt.user_id == token_user.id,
             ),
         )
         .options(
@@ -155,6 +164,8 @@ async def get_messages(
         is_deleted_for_me,
         delivered,
         read,
+        my_delivered_at,
+        my_read_at,
     ) in rows:
         # print(delivered, "D-----------------------")
         # print(read, "R-----------------------")
@@ -325,8 +336,8 @@ async def get_messages(
                 else None
             ),
             "type": message.type.value,
-            "delivered": delivered if is_mine else None,
-            "read": read if is_mine else None,
+            "delivered": delivered if is_mine else (my_delivered_at is not None),
+            "read": read if is_mine else (my_read_at is not None),
             "reply_to": reply_to,
             "reactions": list(reaction_map.values()),
         }
