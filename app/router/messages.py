@@ -8,7 +8,7 @@ from app.models.chat.participants import ConversationParticipant,ParticipantRole
 from app.models.chat.messages import Message,MessageType,MessageDeleteState,MessageReceipt, MessageEvent
 from app.models.auth.user import User, UserRole
 from sqlalchemy import select,func,outerjoin,and_,exists
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, aliased
 from datetime import timezone, datetime
 from app.services.messages import MessageService
 from app.models.profile.profile import UserProfile
@@ -81,6 +81,7 @@ async def get_messages(
                 MessageReceipt.delivered_at.is_not(None),
             )
         )
+        .correlate(Message)
         .scalar_subquery()
     )
 
@@ -93,8 +94,11 @@ async def get_messages(
                 MessageReceipt.read_at.is_not(None),
             )
         )
+        .correlate(Message)
         .scalar_subquery()
     )
+
+    MyMessageReceipt = aliased(MessageReceipt, name="my_message_receipt")
 
     query = (
         select(
@@ -104,8 +108,8 @@ async def get_messages(
             MessageDeleteState.user_id.label("is_deleted_for_me"),
             (delivered_count_sq >= participant_count_sq).label("is_delivered"),
             (read_count_sq >= participant_count_sq).label("is_read"),
-            MessageReceipt.delivered_at.label("my_delivered_at"),
-            MessageReceipt.read_at.label("my_read_at"),
+            MyMessageReceipt.delivered_at.label("my_delivered_at"),
+            MyMessageReceipt.read_at.label("my_read_at"),
         )
         .outerjoin(
             User,
@@ -123,10 +127,10 @@ async def get_messages(
             ),
         )
         .outerjoin(
-            MessageReceipt,
+            MyMessageReceipt,
             and_(
-                MessageReceipt.message_id == Message.id,
-                MessageReceipt.user_id == token_user.id,
+                MyMessageReceipt.message_id == Message.id,
+                MyMessageReceipt.user_id == token_user.id,
             ),
         )
         .options(
