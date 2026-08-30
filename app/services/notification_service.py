@@ -144,6 +144,9 @@ class NotificationService:
                         print(f"[DEBUG] [WebPush] Failure is permanent (Status {ex.response.status_code}). Scheduling cleanup.")
                         return True
                     return False
+                except Exception as ex:
+                    print(f"[ERROR] [WebPush] Unexpected error during push dispatch to {sub['endpoint'][:60]}: {repr(ex)}")
+                    return False
 
             should_delete = await asyncio.to_thread(sync_push)
             if should_delete:
