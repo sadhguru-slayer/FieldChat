@@ -18,6 +18,21 @@ def upload_file(file: UploadFile = File(...), storage_service: StorageService = 
         # Return path (e.g. /fieldchat-media/some-uuid.png or absolute OCI/S3 URL if S3_PUBLIC_URL is set)
         if settings.S3_PUBLIC_URL:
             file_url = f"{settings.S3_PUBLIC_URL.rstrip('/')}/{unique_filename}"
+        elif ".compat.objectstorage." in settings.S3_ENDPOINT_URL:
+            try:
+                # Auto-detect and parse OCI endpoint URL:
+                # https://{namespace}.compat.objectstorage.{region}.oraclecloud.com
+                # or https://{namespace}.compat.objectstorage.{region}.oci.customer-oci.com
+                endpoint = settings.S3_ENDPOINT_URL
+                parts = endpoint.split(".compat.objectstorage.")
+                namespace = parts[0].split("://")[-1]
+                remaining = parts[1].split(".")
+                region = remaining[0]
+                domain = "oraclecloud.com" if "oraclecloud.com" in endpoint else "oci.customer-oci.com"
+                file_url = f"https://objectstorage.{region}.{domain}/n/{namespace}/b/{settings.S3_BUCKET_NAME}/o/{unique_filename}"
+            except Exception as e:
+                print(f"[Storage Warning] Failed to auto-construct OCI URL: {e}", flush=True)
+                file_url = f"/{settings.S3_BUCKET_NAME}/{unique_filename}"
         else:
             file_url = f"/{settings.S3_BUCKET_NAME}/{unique_filename}"
         
