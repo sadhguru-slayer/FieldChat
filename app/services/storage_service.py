@@ -1,3 +1,8 @@
+import os
+# Force botocore to avoid request/response checksum calculations that trigger AWS chunked encoding
+os.environ["AWS_REQUEST_CHECKSUM_CALCULATION"] = "when_required"
+os.environ["AWS_RESPONSE_CHECKSUM_VALIDATION"] = "when_required"
+
 import boto3
 import json
 from botocore.client import Config
@@ -6,14 +11,21 @@ from app.config import settings
 class StorageService:
     def __init__(self):
         # OCI Object Storage is fully S3 compatible. We configure the client with
-        # signature_version='s3v4' to satisfy OCI requirements.
+        # signature_version='s3v4' and payload_signing_enabled=False to prevent
+        # AWS chunked encoding issues while retaining authentication.
         self.s3 = boto3.client(
             "s3",
             endpoint_url=settings.S3_ENDPOINT_URL,
             aws_access_key_id=settings.S3_ACCESS_KEY,
             aws_secret_access_key=settings.S3_SECRET_KEY,
             region_name=settings.S3_REGION_NAME,
-            config=Config(signature_version="s3v4"),
+            config=Config(
+                signature_version="s3v4",
+                s3={
+                    "payload_signing_enabled": False,
+                    "addressing_style": "path"
+                }
+            ),
         )
 
     def init_bucket(self):
