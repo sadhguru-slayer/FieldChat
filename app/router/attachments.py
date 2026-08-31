@@ -16,7 +16,11 @@ def upload_file(file: UploadFile = File(...), storage_service: StorageService = 
         extension = file.filename.split(".")[-1] if "." in file.filename else ""
         unique_filename = f"{uuid.uuid4()}.{extension}" if extension else str(uuid.uuid4())
         
-        # Upload using the corrected parameter call
+        # Ensure file stream starts at position 0
+        if hasattr(file.file, "seek"):
+            file.file.seek(0)
+            
+        # Upload using storage service
         storage_service.upload_file(file.file, unique_filename, content_type=file.content_type)
         
         # Return path (e.g. /fieldchat-media/some-uuid.png or absolute OCI/S3 URL if S3_PUBLIC_URL is set)

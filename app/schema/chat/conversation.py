@@ -7,6 +7,6 @@ class CreateConversation(BaseModel):
     participants : List[str | None]
 
 class ConversationPatch(BaseModel):
-    name: str | None
-    description: str | None
-    # avatar_url: str | None
+    name: str | None = None
+    description: str | None = None
+    avatar_url: str | None = None

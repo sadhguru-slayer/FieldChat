@@ -298,7 +298,6 @@ async def web_socket_endpoint(
                         "online": True,
                     })
                 )
-
     except WebSocketDisconnect:
         pass
     except Exception as e:

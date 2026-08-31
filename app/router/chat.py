@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from app.services.storage_service import StorageService
 from app.schema.chat.conversation import CreateConversation, ConversationPatch
 from app.core.rate_limit import RedisRateLimiter
 from app.dependencies import DBSession
@@ -131,6 +132,7 @@ async def patch_conversation(
     conversation_id: str,
     data: ConversationPatch,
     db: DBSession,
+    background_tasks: BackgroundTasks,
     token: str = Depends(oauth2_scheme),
 ):
     token_user = await user_service.get_current_user(db, token)
@@ -174,6 +176,8 @@ async def patch_conversation(
             detail="You are not a member of this conversation"
         )
 
+    old_avatar = conversation.avatar_url
+
     if "name" in data.model_fields_set:
         conversation.name = data.name
 
@@ -185,6 +189,11 @@ async def patch_conversation(
 
     await db.commit()
     await db.refresh(conversation)
+    await conversation_cache.sync_conversation(str(conversation.id), db)
+
+    if "avatar_url" in data.model_fields_set and old_avatar and old_avatar != conversation.avatar_url:
+        storage_service = StorageService()
+        background_tasks.add_task(storage_service.delete_media_by_url, old_avatar)
 
     return {
         "conversation_id": conversation.id,
@@ -756,6 +765,8 @@ async def get_user_groups(db:DBSession,token:str = Depends(oauth2_scheme)):
         {
             "id": group.id,
             "title": group.name,
+            "description": group.description,
+            "avatar": group.avatar_url,
             "type": group.type.value,
             "role": role.value,
             "member_count": member_count,
