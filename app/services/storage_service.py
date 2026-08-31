@@ -108,17 +108,20 @@ class StorageService:
             return False
         
         print(f"[StorageService] Parsing media URL for deletion: '{media_url}'", flush=True)
-        prefix = f"/{settings.S3_BUCKET_NAME}/"
-        if prefix in media_url:
-            object_name = media_url.split(prefix, 1)[1]
-        elif media_url.startswith(prefix):
-            object_name = media_url[len(prefix):]
+        if "/o/" in media_url:
+            object_name = media_url.split("/o/", 1)[1]
         else:
-            parts = media_url.strip("/").split("/")
-            if len(parts) >= 2:
-                object_name = parts[-1]
+            prefix = f"/{settings.S3_BUCKET_NAME}/"
+            if prefix in media_url:
+                object_name = media_url.split(prefix, 1)[1]
+            elif media_url.startswith(prefix):
+                object_name = media_url[len(prefix):]
             else:
-                object_name = media_url
+                parts = media_url.strip("/").split("/")
+                if len(parts) >= 2:
+                    object_name = parts[-1]
+                else:
+                    object_name = media_url
         
         if "?" in object_name:
             object_name = object_name.split("?", 1)[0]

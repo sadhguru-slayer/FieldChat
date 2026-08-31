@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     S3_SECRET_KEY: str = "minioadmin"
     S3_BUCKET_NAME: str = "fieldchat-media"
     S3_REGION_NAME: str = "us-east-1"
+    S3_PUBLIC_URL: str = ""
 
 
     model_config = SettingsConfigDict(

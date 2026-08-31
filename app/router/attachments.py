@@ -15,9 +15,11 @@ def upload_file(file: UploadFile = File(...), storage_service: StorageService = 
         # Upload using the corrected parameter call
         storage_service.upload_file(file.file, unique_filename, content_type=file.content_type)
         
-        # Return path (e.g. /fieldchat-media/some-uuid.png)
-        # Frontend can prepend standard storage host (http://localhost:9000 or OCI URL)
-        file_url = f"/{settings.S3_BUCKET_NAME}/{unique_filename}"
+        # Return path (e.g. /fieldchat-media/some-uuid.png or absolute OCI/S3 URL if S3_PUBLIC_URL is set)
+        if settings.S3_PUBLIC_URL:
+            file_url = f"{settings.S3_PUBLIC_URL.rstrip('/')}/{unique_filename}"
+        else:
+            file_url = f"/{settings.S3_BUCKET_NAME}/{unique_filename}"
         
     except Exception as e:
         import traceback
