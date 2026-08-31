@@ -238,6 +238,28 @@ async def web_socket_endpoint(
                                 watcher_id=str(user.id),
                                 target_user_id=str(other_user_id),
                             )
+            elif event == "presence.unfocus":
+                import time
+                await presence_cache.set_offline(str(user.id))
+                await r.publish(
+                    "presence",
+                    json.dumps({
+                        "event": "presence",
+                        "user_id": str(user.id),
+                        "online": False,
+                        "last_seen": int(time.time()),
+                    })
+                )
+            elif event == "presence.focus":
+                await r.sadd("online_users", str(user.id))
+                await r.publish(
+                    "presence",
+                    json.dumps({
+                        "event": "presence",
+                        "user_id": str(user.id),
+                        "online": True,
+                    })
+                )
 
     except WebSocketDisconnect:
         pass
