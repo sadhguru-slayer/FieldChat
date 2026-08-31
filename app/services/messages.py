@@ -1,5 +1,5 @@
 from app.models.chat.participants import ConversationParticipant, ParticipantRole
-from sqlalchemy import select
+from sqlalchemy import select, delete
 
 from datetime import timezone,datetime
 import json
@@ -54,6 +54,8 @@ class MessageService:
         reply_to=None,
         reaction=None,
     old_reaction=None,
+        media_url=None,
+        media_name=None,
     ):
         return MessageEventPayload(
             event=event,
@@ -77,6 +79,8 @@ class MessageService:
             reply_to=reply_to,
             reaction=reaction,
         old_reaction=old_reaction,
+            media_url=media_url,
+            media_name=media_name,
         )
 
     async def _get_reply_preview(self, message_id, user_id):
@@ -135,6 +139,8 @@ class MessageService:
         conversation_id,
         content,
         reply_to_message_id=None,
+        media_url=None,
+        media_name=None,
     ):
         if not await conversation_cache.is_member(
             str(conversation_id),
@@ -145,9 +151,12 @@ class MessageService:
                 error="NOT_CONVERSATION_MEMBER",
             )
 
-        content = content.strip()
+        if content:
+            content = content.strip()
+        else:
+            content = ""
 
-        if not content:
+        if not content and not media_url:
             return ServiceResult(
                 success=False,
                 error="EMPTY_MESSAGE",
@@ -178,6 +187,8 @@ class MessageService:
             sender_id=user.id,
             message=content,
             reply_to_message_id=reply_to.id if reply_to else None,
+            media_url=media_url,
+            media_name=media_name,
         )
 
         self.db.add(db_message)
@@ -223,6 +234,8 @@ class MessageService:
             message=content,
             timestamp=db_message.timestamp,
             reply_to=reply_preview,
+            media_url=db_message.media_url,
+            media_name=db_message.media_name,
         )
 
         await r.publish(
@@ -236,6 +249,12 @@ class MessageService:
                 ConversationParticipant.user_id != user.id,
             )
             other_members = (await self.db.execute(stmt)).scalars().all()
+            
+            notif_body = content
+            if not notif_body and db_message.media_url:
+                is_image = any(db_message.media_name.lower().endswith(ext) for ext in [".jpeg", ".jpg", ".gif", ".png", ".webp", ".svg"]) if db_message.media_name else False
+                notif_body = "📷 Photo" if is_image else "📁 Attachment"
+
             for member_id in other_members:
                 # Do not send notifications to users actively viewing this conversation
                 if await active_users_cache.is_user_active(str(conversation_id), str(member_id)):
@@ -245,7 +264,7 @@ class MessageService:
                     db=self.db,
                     user_id=member_id,
                     title=f"New message from {user.username}",
-                    body=content[:100] + ("..." if len(content) > 100 else ""),
+                    body=notif_body[:100] + ("..." if len(notif_body) > 100 else "") if notif_body else "",
                     type=NotificationType.MESSAGE,
                     data={
                         "conversation_id": str(conversation_id),
@@ -403,6 +422,15 @@ class MessageService:
 
         message.is_deleted_global = True
 
+        if message.media_url:
+            try:
+                from app.services.storage_service import StorageService
+                StorageService().delete_media_by_url(message.media_url)
+            except Exception as e:
+                print(f"[Storage Error] Failed to delete media for message {message.id}: {e}")
+            message.media_url = None
+            message.media_name = None
+
         await self.db.commit()
         await self.db.refresh(message)
 
@@ -499,6 +527,46 @@ class MessageService:
             success=True,
             data=event_payload,
         )
+
+    async def clear_chat(self, user_id, conversation_id):
+        # Fetch all messages with media URLs in this conversation
+        stmt = select(Message.media_url).where(
+            Message.conversation_id == conversation_id,
+            Message.media_url.isnot(None),
+        )
+        media_urls = (await self.db.execute(stmt)).scalars().all()
+        
+        # Delete from MinIO
+        if media_urls:
+            try:
+                from app.services.storage_service import StorageService
+                storage_service = StorageService()
+                for url in media_urls:
+                    if url:
+                        storage_service.delete_media_by_url(url)
+            except Exception as e:
+                print(f"[Storage Error] Failed to delete media on clear_chat: {e}")
+
+        # Delete all messages from database
+        await self.db.execute(
+            delete(Message).where(
+                Message.conversation_id == conversation_id
+            )
+        )
+
+        """The below code should be implemented later for soft deleting/clear_chat"""
+        # stmt = select(Message.id).where(
+        #     Message.conversation_id == conversation_id
+        # )
+        # message_ids = (await self.db.execute(stmt)).scalars().all()
+        # for message in messages:
+        #     delete_state = MessageDeleteState(
+        #         message_id=message.id,
+        #         user_id=user_id,
+        #     )
+        #     self.db.add(delete_state)
+        await self.db.commit()
+        return ServiceResult(success=True, data=True)
 
     async def mark_delivered(self, user, conversation_id, message_id):
         if not conversation_id or not message_id:
@@ -637,6 +705,78 @@ class MessageService:
         )
 
         return ServiceResult(success=True, data=receipt)
+
+
+    async def mark_all_read(self, user, conversation_id):
+        if not conversation_id:
+            return ServiceResult(success=False, error="NOT_ENOUGH_PARAMETERS")
+
+        if not await conversation_cache.is_member(
+            str(conversation_id),
+            str(user.id),
+        ):
+            return ServiceResult(success=False, error="NOT_CONVERSATION_MEMBER")
+
+        # Find all messages in this conversation not sent by this user, where they don't have a read receipt yet
+        stmt = (
+            select(Message)
+            .outerjoin(
+                MessageReceipt,
+                (MessageReceipt.message_id == Message.id)
+                & (MessageReceipt.user_id == user.id)
+            )
+            .where(
+                Message.conversation_id == conversation_id,
+                Message.sender_id != user.id,
+                MessageReceipt.read_at.is_(None)
+            )
+        )
+        messages = (await self.db.execute(stmt)).scalars().all()
+
+        if not messages:
+            return ServiceResult(success=True, data=True)
+
+        now = datetime.now(timezone.utc)
+
+        # For each message, check if receipt exists, otherwise create it
+        for message in messages:
+            stmt = select(MessageReceipt).where(
+                MessageReceipt.message_id == message.id,
+                MessageReceipt.user_id == user.id,
+            )
+            receipt = (await self.db.execute(stmt)).scalar_one_or_none()
+
+            if not receipt:
+                receipt = MessageReceipt(
+                    message_id=message.id,
+                    user_id=user.id,
+                    delivered_at=now,
+                    read_at=now,
+                )
+                self.db.add(receipt)
+            else:
+                if not receipt.delivered_at:
+                    receipt.delivered_at = now
+                receipt.read_at = now
+
+        await self.db.commit()
+
+        # Let's broadcast MESSAGE_READ event for each message
+        for message in messages:
+            event_payload = self._build_event(
+                MessageEvent.MESSAGE_READ,
+                message.id,
+                conversation_id,
+                sender_id=message.sender_id,
+                user_id=user.id,
+                timestamp=now,
+            )
+            await r.publish(
+                RedisKeys.conversation_key(str(conversation_id)),
+                event_payload.model_dump_json(),
+            )
+
+        return ServiceResult(success=True, data=True)
 
 
     async def add_reaction(self, user, conversation_id, message_id, reaction):

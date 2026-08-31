@@ -17,3 +17,5 @@ class MessageEventPayload(BaseModel):
     reply_to: dict | None = None
     reaction: str | None = None
     old_reaction: str | None = None
+    media_url: str | None = None
+    media_name: str | None = None

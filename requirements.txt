@@ -38,3 +38,5 @@ fastadmin[fastapi,sqlalchemy]
 
 # WebPush
 pywebpush
+
+boto3

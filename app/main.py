@@ -11,6 +11,7 @@ from app.router.messages import router as message_router
 from app.router.profile import profile_router
 from app.router.settings import settings_router
 from app.router.notification import notification_router
+from app.router.attachments import router as attachment_router
 from app.ws.sockets import router as MessageRouter
 from app.admin import *
 from fastadmin import fastapi_app as admin_app
@@ -48,6 +49,15 @@ async def lifespan(app:FastAPI):
             await lock.release()
     listener_task = asyncio.create_task(start_redis_listener())
     app.state.redis_listener = listener_task
+
+    # Add this inside the lifespan context manager:
+    from app.services.storage_service import StorageService
+    try:
+        StorageService().init_bucket()
+        print("[Startup] Storage bucket initialized.")
+    except Exception as e:
+        print(f"[Startup] Error initializing storage bucket: {e}")
+
     yield
     listener_task.cancel()
 
@@ -82,14 +92,15 @@ app.add_middleware(
 
 app.mount("/admin", admin_app)
 
-app.include_router(auth_router)
-app.include_router(token_router)
+app.include_router(attachment_router)
 app.include_router(user_router)
-app.include_router(profile_router)
 app.include_router(settings_router)
-app.include_router(notification_router)
 app.include_router(MessageRouter)
+app.include_router(notification_router)
 app.include_router(message_router)
+app.include_router(profile_router)
 app.include_router(chat_router)
+app.include_router(token_router)
+app.include_router(auth_router)
 # app.include_router(general_chat_router)
 # app.include_router(general_message_router)

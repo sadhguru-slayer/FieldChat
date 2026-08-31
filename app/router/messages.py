@@ -344,6 +344,8 @@ async def get_messages(
             "read": read if is_mine else (my_read_at is not None),
             "reply_to": reply_to,
             "reactions": list(reaction_map.values()),
+            "media_url": message.media_url,
+            "media_name": message.media_name,
         }
 
         events.append(
@@ -362,11 +364,55 @@ async def get_messages(
 
     return events
 
+from app.services.conversations import conversation_service
+
+@router.delete('/clear-chat')
+async def clear_chat(conversation_id:str, db:DBSession, token:str = Depends(oauth2_scheme)):
+    message_service = MessageService(db)
+    token_user = await user_service.get_current_user(db,token)
+    try:
+        conversation_uuid = UUID(conversation_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid UUID")
+
+    conversation = await db.scalar(
+        select(Conversation).where(
+            Conversation.id == conversation_uuid
+        )
+    )
+    if not conversation:
+        raise HTTPException(
+            status_code=404,
+            detail="Conversation not found",
+        )
+    if not await conversation_service.is_user_participant(db, conversation_uuid, token_user.id):
+        raise HTTPException(
+            status_code=403,
+            detail="User is not a participant in this conversation",
+        )
+    
+    result = await message_service.clear_chat(
+        user_id=token_user.id,
+        conversation_id=conversation_uuid,
+    )
+
+    if not result.success:
+        raise HTTPException(
+            status_code=400,
+            detail=result.error,
+        )
+
+    return result.data
+
+    
+
 @router.post("/create-message")
 async def create_message(
     conversation_id: str,
-    content: str,
+    content: str | None = None,
     reply_to_message_id: str | None = None,
+    media_url: str | None = None,
+    media_name: str | None = None,
     db: DBSession = None,
     token: str = Depends(oauth2_scheme),
 ):
@@ -395,6 +441,8 @@ async def create_message(
         conversation_id=conversation_uuid,
         content=content,
         reply_to_message_id=reply_uuid,
+        media_url=media_url,
+        media_name=media_name,
     )
 
     if not result.success:
@@ -499,6 +547,32 @@ async def mark_message_read(
     result = await message_service.mark_read(
         user=token_user,
         message_id=message_id,
+    )
+    if not result.success:
+        raise HTTPException(
+            status_code=400,
+            detail=result.error,
+        )
+
+    return result.data
+
+
+@router.post("/conversations/{conversation_id}/read-all")
+async def mark_all_messages_read(
+    conversation_id: str,
+    db: DBSession,
+    token: str = Depends(oauth2_scheme),
+):
+    message_service = MessageService(db)
+    token_user = await user_service.get_current_user(db, token)
+    try:
+        conversation_uuid = UUID(conversation_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid UUID")
+
+    result = await message_service.mark_all_read(
+        user=token_user,
+        conversation_id=conversation_uuid,
     )
     if not result.success:
         raise HTTPException(

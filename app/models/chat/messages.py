@@ -57,6 +57,9 @@ class Message(UUIDMixin,Base):
         default=MessageType.CHAT
     )
 
+    media_url : Mapped[str | None] = mapped_column(String, nullable=True)
+    media_name : Mapped[str | None] = mapped_column(String, nullable=True)
+
     message: Mapped[str] = mapped_column(Text)
     edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_deleted_global: Mapped[bool] = mapped_column(Boolean, default=False)

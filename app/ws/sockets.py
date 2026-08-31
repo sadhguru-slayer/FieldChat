@@ -83,6 +83,8 @@ async def web_socket_endpoint(
             message_id = data.get("message_id") or None
             content = data.get("content")
             reply_to_message_id = data.get("reply_to_message_id") or None
+            media_url = data.get("media_url") or None
+            media_name = data.get("media_name") or None
 
             if event in [
                 MessageEvent.MESSAGE_CREATED.value,
@@ -93,7 +95,7 @@ async def web_socket_endpoint(
                 async with SessionLocal() as db:
                     service = MessageService(db)
                     if event == MessageEvent.MESSAGE_CREATED.value:
-                        await service.create_message(user, conversation_id, content, reply_to_message_id)
+                        await service.create_message(user, conversation_id, content, reply_to_message_id, media_url, media_name)
                     elif event == MessageEvent.MESSAGE_EDITED.value:
                         await service.edit_message(user, conversation_id, message_id, content)
                     elif event == MessageEvent.MESSAGE_DELETED_FOR_EVERYONE.value:
