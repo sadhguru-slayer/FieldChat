@@ -15,7 +15,13 @@ from app.services.user import user_service
 from app.services.auth import auth_service
 from app.models.profile.profile import UserProfile
 from app.models.profile.settings import UserSettings
+from app.core.rate_limit import RedisRateLimiter
 import re
+
+# Rate limit login attempts: max 5 requests per minute per IP
+login_ip_limiter = RedisRateLimiter(limit=5, window_seconds=60, key_prefix="login_ip")
+# Rate limit login attempts: max 5 requests per minute per target username/email
+login_username_limiter = RedisRateLimiter(limit=5, window_seconds=60, key_prefix="login_username")
 
 
 router = APIRouter(
@@ -151,8 +157,11 @@ async def sync_user_data(db: DBSession):
     }
 
 
-@router.post("/login")
+@router.post("/login", dependencies=[Depends(login_ip_limiter)])
 async def login(request:Request,db:DBSession,form_data:Annotated[OAuth2PasswordRequestForm,Depends()]):
+    # Rate limit by the target username/email to prevent brute forcing a specific account
+    await login_username_limiter.check_rate_limit(form_data.username)
+
     user = await user_service.get_user_with_email_or_username(db,form_data.username)
     if not user:
         raise HTTPException(404,"User not found")

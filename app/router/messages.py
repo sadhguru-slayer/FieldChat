@@ -636,3 +636,40 @@ async def remove_reaction(
         raise HTTPException(status_code=400, detail=result.error)
 
     return result.data
+
+
+from app.schema.chat.message import BulkForwardRequest, BulkDeleteRequest
+
+@router.post("/bulk-forward")
+async def bulk_forward_messages(
+    payload: BulkForwardRequest,
+    db: DBSession,
+    token: str = Depends(oauth2_scheme),
+):
+    token_user = await user_service.get_current_user(db, token)
+    result = await MessageService(db).bulk_forward_messages(
+        user=token_user,
+        message_ids=payload.message_ids,
+        target_conversation_ids=payload.target_conversation_ids,
+    )
+    if not result.success:
+        raise HTTPException(status_code=400, detail=result.error)
+    return result.data
+
+@router.post("/bulk-delete")
+async def bulk_delete_messages(
+    payload: BulkDeleteRequest,
+    db: DBSession,
+    token: str = Depends(oauth2_scheme),
+):
+    token_user = await user_service.get_current_user(db, token)
+    result = await MessageService(db).bulk_delete_messages(
+        user=token_user,
+        conversation_id=payload.conversation_id,
+        message_ids=payload.message_ids,
+        delete_type=payload.delete_type,
+    )
+    if not result.success:
+        raise HTTPException(status_code=400, detail=result.error)
+    return result.data
+

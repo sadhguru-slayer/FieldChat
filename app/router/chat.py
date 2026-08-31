@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from app.schema.chat.conversation import CreateConversation, ConversationPatch
+from app.core.rate_limit import RedisRateLimiter
 from app.dependencies import DBSession
 from app.core.security.auth import oauth2_scheme
 from app.services.user import user_service
@@ -40,12 +41,15 @@ router = APIRouter(
     tags = ["Chat Router Manager"]
 )
 
+# Rate limit conversation creation (e.g. max 10 per minute per user)
+conversation_limiter = RedisRateLimiter(limit=10, window_seconds=60, key_prefix="conversation_create")
+
 general_chat_router = APIRouter(
     prefix="/api/dev/chat",
     tags = ["General Chat Router Manager"]
 )
 
-@router.post("/create-coversation")
+@router.post("/create-coversation", dependencies=[Depends(conversation_limiter)])
 async def create_coversation(form_data:CreateConversation,db:DBSession,token:str = Depends(oauth2_scheme)):
     token_user = await user_service.get_current_user(db,token)
     conversation = Conversation(
@@ -524,7 +528,7 @@ async def remove_member(
     }
     
 
-@router.post('/create-dm')
+@router.post('/create-dm', dependencies=[Depends(conversation_limiter)])
 async def create_dm(db:DBSession,target_id:str,token:str=Depends(oauth2_scheme)):
     token_user = await user_service.get_current_user(db,token)
     if(target_id == token_user.id):

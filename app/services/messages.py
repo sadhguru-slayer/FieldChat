@@ -960,3 +960,155 @@ class MessageService:
                 RedisKeys.user_chanel(str(message.sender_id)),
                 event_payload.model_dump_json(),
             )
+
+    async def bulk_forward_messages(
+        self,
+        user,
+        message_ids: list[UUID],
+        target_conversation_ids: list[UUID],
+    ):
+        if not message_ids or not target_conversation_ids:
+            return ServiceResult(success=False, error="EMPTY_SELECTION")
+
+        for conv_id in target_conversation_ids:
+            if not await conversation_cache.is_member(str(conv_id), str(user.id)):
+                return ServiceResult(success=False, error=f"NOT_MEMBER_OF_{conv_id}")
+
+        stmt = (
+            select(Message)
+            .where(Message.id.in_(message_ids))
+            .order_by(Message.timestamp.asc())
+        )
+        orig_messages = (await self.db.execute(stmt)).scalars().all()
+
+        if not orig_messages:
+            return ServiceResult(success=False, error="MESSAGES_NOT_FOUND")
+
+        created_events = []
+
+        for target_id in target_conversation_ids:
+            for orig_msg in orig_messages:
+                db_message = Message(
+                    conversation_id=target_id,
+                    sender_id=user.id,
+                    message=orig_msg.message or "",
+                    media_url=orig_msg.media_url,
+                    media_name=orig_msg.media_name,
+                )
+                self.db.add(db_message)
+                await self.db.flush()
+
+                event_payload = self._build_event(
+                    MessageEvent.MESSAGE_CREATED,
+                    db_message.id,
+                    target_id,
+                    sender_id=user.id,
+                    username=user.username,
+                    display_name=user.profile.display_name if user.profile else None,
+                    message=db_message.message,
+                    timestamp=db_message.timestamp,
+                    media_url=db_message.public_media_url,
+                    media_name=db_message.media_name,
+                )
+                created_events.append((target_id, event_payload))
+
+        await self.db.commit()
+
+        for target_id, payload in created_events:
+            await r.publish(
+                RedisKeys.conversation_key(str(target_id)),
+                payload.model_dump_json(),
+            )
+
+        return ServiceResult(success=True, data={"forwarded_count": len(created_events)})
+
+    async def bulk_delete_messages(
+        self,
+        user,
+        conversation_id: UUID,
+        message_ids: list[UUID],
+        delete_type: str,
+    ):
+        if not message_ids or not conversation_id:
+            return ServiceResult(success=False, error="EMPTY_SELECTION")
+
+        if not await conversation_cache.is_member(str(conversation_id), str(user.id)):
+            return ServiceResult(success=False, error="NOT_CONVERSATION_MEMBER")
+
+        stmt = select(Message).where(
+            Message.id.in_(message_ids),
+            Message.conversation_id == conversation_id,
+        )
+        messages = (await self.db.execute(stmt)).scalars().all()
+
+        if not messages:
+            return ServiceResult(success=False, error="MESSAGES_NOT_FOUND")
+
+        events_to_publish = []
+
+        if delete_type == "for_everyone":
+            role_stmt = select(ConversationParticipant.role).where(
+                ConversationParticipant.user_id == user.id,
+                ConversationParticipant.conversation_id == conversation_id,
+            )
+            participant_role = (await self.db.execute(role_stmt)).scalar_one_or_none()
+
+            for msg in messages:
+                if msg.sender_id != user.id and participant_role not in (ParticipantRole.ADMIN, ParticipantRole.OWNER):
+                    continue
+
+                if msg.is_deleted_global:
+                    continue
+
+                msg.is_deleted_global = True
+
+                if msg.media_url:
+                    try:
+                        from app.services.storage_service import StorageService
+                        StorageService().delete_media_by_url(msg.media_url)
+                    except Exception as e:
+                        print(f"[Storage Error] Failed to delete media: {e}")
+                    msg.media_url = None
+                    msg.media_name = None
+
+                event_payload = self._build_event(
+                    MessageEvent.MESSAGE_DELETED_FOR_EVERYONE,
+                    msg.id,
+                    conversation_id,
+                    sender_id=msg.sender_id,
+                    message="Deleted for everyone",
+                    timestamp=msg.timestamp,
+                )
+                events_to_publish.append((RedisKeys.conversation_key(str(conversation_id)), event_payload))
+
+            await self.db.commit()
+
+        elif delete_type == "for_me":
+            for msg in messages:
+                stmt_existing = select(MessageDeleteState).where(
+                    MessageDeleteState.message_id == msg.id,
+                    MessageDeleteState.user_id == user.id,
+                )
+                existing = (await self.db.execute(stmt_existing)).scalar_one_or_none()
+                if not existing:
+                    delete_state = MessageDeleteState(
+                        message_id=msg.id,
+                        user_id=user.id,
+                    )
+                    self.db.add(delete_state)
+
+                event_payload = self._build_event(
+                    MessageEvent.MESSAGE_DELETED_FOR_ME,
+                    msg.id,
+                    conversation_id,
+                    user_id=user.id,
+                )
+                events_to_publish.append((f"user:{user.id}", event_payload))
+
+            await self.db.commit()
+
+        for channel, payload in events_to_publish:
+            await r.publish(channel, payload.model_dump_json())
+
+        return ServiceResult(success=True, data={"deleted_count": len(events_to_publish)})
+

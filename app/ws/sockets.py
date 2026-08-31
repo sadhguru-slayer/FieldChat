@@ -1,6 +1,7 @@
 import json
 from uuid import UUID
-from fastapi import APIRouter, WebSocket, Query, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, Query, WebSocketDisconnect, HTTPException
+from app.core.rate_limit import RedisRateLimiter
 from sqlalchemy import select
 
 from app.database import SessionLocal
@@ -29,11 +30,37 @@ async def get_other_user(conversation_id, user_id, db):
         print(f"Error in get_other_user: {e}")
         return None
 
+def get_ws_client_ip(ws: WebSocket) -> str:
+    x_forwarded_for = ws.headers.get("x-forwarded-for")
+    if x_forwarded_for:
+        return x_forwarded_for.split(",")[0].strip()
+    return ws.headers.get("x-real-ip") or (ws.client.host if ws.client else "unknown")
+
+# Rate limit WebSocket connection attempts (e.g. 10 per minute per IP)
+ws_conn_limiter = RedisRateLimiter(limit=20, window_seconds=60, key_prefix="ws_conn")
+
+# Rate limit messages sent via WebSocket (e.g. 30 per minute per user)
+ws_msg_limiter = RedisRateLimiter(limit=60, window_seconds=60, key_prefix="ws_msg")
+
 @router.websocket("/ws")
 async def web_socket_endpoint(
     ws: WebSocket,
     token: str = Query(...),
 ):
+    # Check rate limit for the connection attempt
+    ip = get_ws_client_ip(ws)
+    try:
+        await ws_conn_limiter.check_rate_limit(ip)
+    except HTTPException:
+        await ws.accept()
+        await ws.send_json({
+            "event": "error",
+            "error": "rate_limit",
+            "message": "Too many WebSocket connection attempts. Please try again later."
+        })
+        await ws.close(code=1008)
+        return
+
 
     async with SessionLocal() as db:
         user = await user_service.get_current_user_ws(db, token)
@@ -92,6 +119,17 @@ async def web_socket_endpoint(
                 MessageEvent.MESSAGE_DELETED_FOR_EVERYONE.value,
                 MessageEvent.MESSAGE_DELETED_FOR_ME.value,
             ]:
+                if event == MessageEvent.MESSAGE_CREATED.value:
+                    try:
+                        await ws_msg_limiter.check_rate_limit(str(user.id))
+                    except HTTPException:
+                        await ws.send_json({
+                            "event": "error",
+                            "error": "rate_limit",
+                            "message": "You are sending messages too fast. Please slow down."
+                        })
+                        continue
+
                 async with SessionLocal() as db:
                     service = MessageService(db)
                     if event == MessageEvent.MESSAGE_CREATED.value:

@@ -2,10 +2,14 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from app.services.storage_service import StorageService
 from app.config import settings
+from app.core.rate_limit import RedisRateLimiter
 
 router = APIRouter(prefix="/api/attachments", tags=["attachments"])
 
-@router.post("/upload")
+# Rate limit uploads to 10 requests per minute
+upload_limiter = RedisRateLimiter(limit=10, window_seconds=60, key_prefix="upload")
+
+@router.post("/upload", dependencies=[Depends(upload_limiter)])
 def upload_file(file: UploadFile = File(...), storage_service: StorageService = Depends()):
     try:
         # Generate a unique filename using UUID
