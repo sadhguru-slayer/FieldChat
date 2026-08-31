@@ -653,7 +653,7 @@ def build_latest_message(
             if receipt
             else None
         ),
-        "media_url": message.media_url if not message.is_deleted_global and not delete_state else None,
+        "media_url": message.public_media_url if not message.is_deleted_global and not delete_state else None,
         "media_name": message.media_name if not message.is_deleted_global and not delete_state else None,
     }
 

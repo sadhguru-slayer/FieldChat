@@ -344,7 +344,7 @@ async def get_messages(
             "read": read if is_mine else (my_read_at is not None),
             "reply_to": reply_to,
             "reactions": list(reaction_map.values()),
-            "media_url": message.media_url,
+            "media_url": message.public_media_url,
             "media_name": message.media_name,
         }
 

@@ -115,6 +115,32 @@ class Message(UUIDMixin,Base):
         ),
     )
 
+    @property
+    def public_media_url(self) -> str | None:
+        if not self.media_url:
+            return None
+        if self.media_url.startswith("http://") or self.media_url.startswith("https://"):
+            return self.media_url
+        
+        # Rewrite relative url to absolute if settings are configured
+        from app.config import settings
+        filename = self.media_url.split("/")[-1]
+        
+        if settings.S3_PUBLIC_URL:
+            return f"{settings.S3_PUBLIC_URL.rstrip('/')}/{filename}"
+        elif ".compat.objectstorage." in settings.S3_ENDPOINT_URL:
+            try:
+                endpoint = settings.S3_ENDPOINT_URL
+                parts = endpoint.split(".compat.objectstorage.")
+                namespace = parts[0].split("://")[-1]
+                remaining = parts[1].split(".")
+                region = remaining[0]
+                domain = "oraclecloud.com" if "oraclecloud.com" in endpoint else "oci.customer-oci.com"
+                return f"https://objectstorage.{region}.{domain}/n/{namespace}/b/{settings.S3_BUCKET_NAME}/o/{filename}"
+            except Exception:
+                return self.media_url
+        return self.media_url
+
     def __str__(self) -> str:
         preview = self.message.replace("\n", " ").strip()
         if len(preview) > 60:

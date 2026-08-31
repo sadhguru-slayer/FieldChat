@@ -234,7 +234,7 @@ class MessageService:
             message=content,
             timestamp=db_message.timestamp,
             reply_to=reply_preview,
-            media_url=db_message.media_url,
+            media_url=db_message.public_media_url,
             media_name=db_message.media_name,
         )
 
