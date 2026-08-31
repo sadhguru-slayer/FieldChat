@@ -13,7 +13,7 @@ def upload_file(file: UploadFile = File(...), storage_service: StorageService = 
         unique_filename = f"{uuid.uuid4()}.{extension}" if extension else str(uuid.uuid4())
         
         # Upload using the corrected parameter call
-        storage_service.upload_file(file.file, unique_filename)
+        storage_service.upload_file(file.file, unique_filename, content_type=file.content_type)
         
         # Return path (e.g. /fieldchat-media/some-uuid.png)
         # Frontend can prepend standard storage host (http://localhost:9000 or OCI URL)

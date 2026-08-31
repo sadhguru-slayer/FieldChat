@@ -49,10 +49,23 @@ class StorageService:
                 print(f"[StorageService Warning] Could not auto-initialize bucket/policy for '{bucket_name}': {e}. "
                       "Ensure the bucket has been pre-created and configured with appropriate IAM/read policies.", flush=True)
 
-    def upload_file(self, file, object_name):
+    def upload_file(self, file, object_name, content_type=None):
         try:
             print(f"[StorageService] Attempting to upload object: '{object_name}' to bucket: '{settings.S3_BUCKET_NAME}'", flush=True)
-            self.s3.upload_fileobj(file, settings.S3_BUCKET_NAME, object_name)
+            if hasattr(file, "seek"):
+                file.seek(0)
+            file_data = file.read()
+            
+            extra_args = {}
+            if content_type:
+                extra_args["ContentType"] = content_type
+                
+            self.s3.put_object(
+                Bucket=settings.S3_BUCKET_NAME,
+                Key=object_name,
+                Body=file_data,
+                **extra_args
+            )
             print(f"[StorageService] Successfully uploaded object: '{object_name}'", flush=True)
             return True
         except Exception as e:
