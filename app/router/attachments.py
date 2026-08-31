@@ -20,7 +20,10 @@ def upload_file(file: UploadFile = File(...), storage_service: StorageService = 
         file_url = f"/{settings.S3_BUCKET_NAME}/{unique_filename}"
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        print(f"[Upload Router Error] Failed uploading file '{file.filename}': {e}", flush=True)
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Storage upload failed: {str(e)}")
         
     return {
         "filename": file.filename,

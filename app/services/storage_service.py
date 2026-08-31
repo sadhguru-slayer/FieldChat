@@ -50,10 +50,22 @@ class StorageService:
                       "Ensure the bucket has been pre-created and configured with appropriate IAM/read policies.", flush=True)
 
     def upload_file(self, file, object_name):
-        self.s3.upload_fileobj(file, settings.S3_BUCKET_NAME, object_name)
+        try:
+            print(f"[StorageService] Attempting to upload object: '{object_name}' to bucket: '{settings.S3_BUCKET_NAME}'", flush=True)
+            self.s3.upload_fileobj(file, settings.S3_BUCKET_NAME, object_name)
+            print(f"[StorageService] Successfully uploaded object: '{object_name}'", flush=True)
+            return True
+        except Exception as e:
+            print(f"[StorageService Error] Failed to upload object '{object_name}': {e}", flush=True)
+            raise e
 
     def download_file(self, object_name):
-        return self.s3.get_object(Bucket=settings.S3_BUCKET_NAME, Key=object_name)
+        try:
+            print(f"[StorageService] Attempting to download object: '{object_name}' from bucket: '{settings.S3_BUCKET_NAME}'", flush=True)
+            return self.s3.get_object(Bucket=settings.S3_BUCKET_NAME, Key=object_name)
+        except Exception as e:
+            print(f"[StorageService Error] Failed to download object '{object_name}': {e}", flush=True)
+            raise e
 
     def delete_file(self, object_name):
         try:
