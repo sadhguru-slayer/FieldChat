@@ -7,6 +7,9 @@ from pydantic import BaseModel, ConfigDict, Field
 class ProfileResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    user_id: str | None = None
+    username: str | None = None
+    email: str | None = None
     display_name: str | None
     bio: str | None
     date_of_birth: date | None

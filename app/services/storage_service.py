@@ -108,23 +108,38 @@ class StorageService:
             print("[StorageService Warning] Empty media_url received for deletion.", flush=True)
             return False
         
+        # Skip external or generated default avatar URLs (e.g. dicebear)
+        if "dicebear.com" in media_url or "api.dicebear" in media_url:
+            print(f"[StorageService] Skipping non-S3 external avatar URL: '{media_url}'", flush=True)
+            return True
+
+        from urllib.parse import unquote, urlparse
         print(f"[StorageService] Parsing media URL for deletion: '{media_url}'", flush=True)
-        if "/o/" in media_url:
-            object_name = media_url.split("/o/", 1)[1]
+        
+        parsed = urlparse(media_url)
+        path = parsed.path or media_url
+
+        if "/o/" in path:
+            object_name = path.split("/o/", 1)[1]
         else:
             prefix = f"/{settings.S3_BUCKET_NAME}/"
-            if prefix in media_url:
-                object_name = media_url.split(prefix, 1)[1]
-            elif media_url.startswith(prefix):
-                object_name = media_url[len(prefix):]
+            if prefix in path:
+                object_name = path.split(prefix, 1)[1]
+            elif path.startswith(prefix):
+                object_name = path[len(prefix):]
             else:
-                parts = media_url.strip("/").split("/")
-                if len(parts) >= 2:
+                parts = path.strip("/").split("/")
+                if len(parts) >= 1:
                     object_name = parts[-1]
                 else:
-                    object_name = media_url
+                    object_name = path
         
         if "?" in object_name:
             object_name = object_name.split("?", 1)[0]
             
+        object_name = unquote(object_name.lstrip("/"))
+        if not object_name:
+            print(f"[StorageService Warning] Could not determine object_name from '{media_url}'", flush=True)
+            return False
+
         return self.delete_file(object_name)

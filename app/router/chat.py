@@ -185,7 +185,7 @@ async def patch_conversation(
         conversation.description = data.description
 
     if "avatar_url" in data.model_fields_set:
-        conversation.avatar_url = data.avatar_url
+        conversation.avatar_url = data.avatar_url if data.avatar_url != "" else None
 
     await db.commit()
     await db.refresh(conversation)
@@ -535,6 +535,197 @@ async def remove_member(
     return {
         "message": f"{token_user.username} removed {target_participant.user.username}"
     }
+
+
+@router.post("/make-admin")
+async def make_admin(
+    target_id: str,
+    group_id: str,
+    db: DBSession,
+    token: str = Depends(oauth2_scheme),
+):
+    target_id = UUID(target_id)
+    group_id = UUID(group_id)
+    token_user = await user_service.get_current_user(db, token)
+
+    # Check caller is member and admin/owner
+    par_res = await db.execute(
+        select(ConversationParticipant).where(
+            ConversationParticipant.conversation_id == group_id,
+            ConversationParticipant.user_id == token_user.id,
+        )
+    )
+    caller_participant = par_res.scalar_one_or_none()
+
+    if not caller_participant:
+        raise HTTPException(status_code=403, detail="You are not a member of this group")
+
+    if caller_participant.role not in [ParticipantRole.ADMIN, ParticipantRole.OWNER]:
+        raise HTTPException(
+            status_code=403,
+            detail="You are not allowed to perform this action",
+        )
+
+    # Get target participant
+    tar_par_res = await db.execute(
+        select(ConversationParticipant)
+        .options(joinedload(ConversationParticipant.user))
+        .where(
+            ConversationParticipant.conversation_id == group_id,
+            ConversationParticipant.user_id == target_id,
+        )
+    )
+    target_participant = tar_par_res.scalar_one_or_none()
+
+    if not target_participant:
+        raise HTTPException(status_code=404, detail="Member not in group")
+
+    if target_participant.role == ParticipantRole.OWNER:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot change role of group owner",
+        )
+
+    if target_participant.role == ParticipantRole.ADMIN:
+        return {
+            "message": f"{target_participant.user.username} is already an admin",
+            "role": "ADMIN",
+        }
+
+    target_participant.role = ParticipantRole.ADMIN
+
+    msg_obj = Message(
+        conversation_id=group_id,
+        sender_id=token_user.id,
+        type=MessageType.SYSTEM,
+        message=f"{token_user.username} made {target_participant.user.username} an admin",
+    )
+    db.add(msg_obj)
+
+    await db.commit()
+    await conversation_cache.sync_conversation(str(group_id), db)
+
+    try:
+        await broadcast_system_message(group_id, msg_obj, token_user.username)
+    except Exception as e:
+        print(f"Failed to broadcast make admin system message: {e}")
+
+    try:
+        group_obj = await db.get(Conversation, group_id)
+        group_name = group_obj.name if group_obj and group_obj.name else "Group"
+        await notification_service.send_notification(
+            db=db,
+            user_id=target_participant.user_id,
+            title="Group Role Updated",
+            body=f"You are now an admin of '{group_name}'",
+            type=NotificationType.SYSTEM,
+            data={
+                "conversation_id": str(group_id),
+                "sub_event": "conversation.role_updated",
+                "username": token_user.username,
+                "group_name": group_name,
+                "new_role": "ADMIN",
+            }
+        )
+    except Exception as e:
+        print(f"Failed to send make admin notification: {e}")
+
+    return {
+        "message": f"{target_participant.user.username} is now an admin",
+        "role": "ADMIN",
+    }
+
+
+@router.post("/dismiss-admin")
+async def dismiss_admin(
+    target_id: str,
+    group_id: str,
+    db: DBSession,
+    token: str = Depends(oauth2_scheme),
+):
+    target_id = UUID(target_id)
+    group_id = UUID(group_id)
+    token_user = await user_service.get_current_user(db, token)
+
+    # Only OWNER can dismiss admins
+    caller_res = await db.execute(
+        select(ConversationParticipant).where(
+            ConversationParticipant.conversation_id == group_id,
+            ConversationParticipant.user_id == token_user.id,
+        )
+    )
+    caller_participant = caller_res.scalar_one_or_none()
+
+    if not caller_participant:
+        raise HTTPException(status_code=403, detail="You are not a member of this group")
+
+    if caller_participant.role != ParticipantRole.OWNER:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the group owner can dismiss admins",
+        )
+
+    tar_par_res = await db.execute(
+        select(ConversationParticipant)
+        .options(joinedload(ConversationParticipant.user))
+        .where(
+            ConversationParticipant.conversation_id == group_id,
+            ConversationParticipant.user_id == target_id,
+        )
+    )
+    target_participant = tar_par_res.scalar_one_or_none()
+
+    if not target_participant:
+        raise HTTPException(status_code=404, detail="Member not in group")
+
+    if target_participant.role != ParticipantRole.ADMIN:
+        return {
+            "message": f"{target_participant.user.username} is not an admin",
+            "role": target_participant.role.value,
+        }
+
+    target_participant.role = ParticipantRole.MEMBER
+
+    msg_obj = Message(
+        conversation_id=group_id,
+        sender_id=token_user.id,
+        type=MessageType.SYSTEM,
+        message=f"{token_user.username} removed {target_participant.user.username} as admin",
+    )
+    db.add(msg_obj)
+
+    await db.commit()
+    await conversation_cache.sync_conversation(str(group_id), db)
+
+    try:
+        await broadcast_system_message(group_id, msg_obj, token_user.username)
+    except Exception as e:
+        print(f"Failed to broadcast dismiss admin system message: {e}")
+
+    try:
+        group_obj = await db.get(Conversation, group_id)
+        group_name = group_obj.name if group_obj and group_obj.name else "Group"
+        await notification_service.send_notification(
+            db=db,
+            user_id=target_participant.user_id,
+            title="Group Role Updated",
+            body=f"You are no longer an admin of '{group_name}'",
+            type=NotificationType.SYSTEM,
+            data={
+                "conversation_id": str(group_id),
+                "sub_event": "conversation.role_updated",
+                "username": token_user.username,
+                "group_name": group_name,
+                "new_role": "MEMBER",
+            }
+        )
+    except Exception as e:
+        print(f"Failed to send dismiss admin notification: {e}")
+
+    return {
+        "message": f"{target_participant.user.username} is now a member",
+        "role": "MEMBER",
+    }
     
 
 @router.post('/create-dm', dependencies=[Depends(conversation_limiter)])
@@ -715,6 +906,7 @@ async def get_user_groups(db:DBSession,token:str = Depends(oauth2_scheme)):
             Message,
             User.username,
             UserProfile.display_name,
+            UserProfile.avatar_url,
             MessageDeleteState,
             MessageReceipt,
             member_count_subquery.label("member_count"),
@@ -766,7 +958,7 @@ async def get_user_groups(db:DBSession,token:str = Depends(oauth2_scheme)):
             "id": group.id,
             "title": group.name,
             "description": group.description,
-            "avatar": group.avatar_url,
+            "avatar": avatar_url,
             "type": group.type.value,
             "role": role.value,
             "member_count": member_count,
@@ -781,7 +973,7 @@ async def get_user_groups(db:DBSession,token:str = Depends(oauth2_scheme)):
                 is_group=True,
             ),
         }
-        for group, role, message, username, display_name, delete_state, receipt, member_count, unread_count in groups
+        for group, role, message, username, display_name,avatar_url, delete_state, receipt, member_count, unread_count in groups
     ]
 
 

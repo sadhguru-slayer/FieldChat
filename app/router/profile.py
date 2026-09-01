@@ -42,7 +42,18 @@ async def get_my_profile(
         await db.commit()
         await db.refresh(profile)
 
-    return profile
+    return {
+        "user_id": str(current_user.id),
+        "username": current_user.username,
+        "email": current_user.email,
+        "display_name": profile.display_name,
+        "bio": profile.bio,
+        "date_of_birth": profile.date_of_birth,
+        "custom_status": profile.custom_status,
+        "avatar_url": profile.avatar_url,
+        "created_at": profile.created_at,
+        "updated_at": profile.updated_at,
+    }
 
 @profile_router.get("/{user_id}/profile")
 async def get_user_profile(
@@ -125,7 +136,10 @@ async def update_my_profile(
     update_data = data.model_dump(exclude_unset=True)
 
     for field, value in update_data.items():
-        setattr(profile, field, value)
+        if field == "avatar_url" and (value == "" or value is None):
+            setattr(profile, field, None)
+        else:
+            setattr(profile, field, value)
 
     await db.commit()
     await db.refresh(profile)
@@ -134,4 +148,15 @@ async def update_my_profile(
         storage_service = StorageService()
         background_tasks.add_task(storage_service.delete_media_by_url, old_avatar)
 
-    return profile
+    return {
+        "user_id": str(token_user.id),
+        "username": token_user.username,
+        "email": token_user.email,
+        "display_name": profile.display_name,
+        "bio": profile.bio,
+        "date_of_birth": profile.date_of_birth,
+        "custom_status": profile.custom_status,
+        "avatar_url": profile.avatar_url,
+        "created_at": profile.created_at,
+        "updated_at": profile.updated_at,
+    }
