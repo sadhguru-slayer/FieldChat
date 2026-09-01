@@ -52,8 +52,13 @@ async def get_user_profile(
 ):
     from app.models.auth.user import User
     from uuid import UUID
-    
-    target_user = await db.get(User, UUID(user_id))
+
+    try:
+        uid = UUID(user_id)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=422, detail="Invalid user ID format")
+
+    target_user = await db.get(User, uid)
     if not target_user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -64,35 +69,30 @@ async def get_user_profile(
     )
 
     profile = result.scalar_one_or_none()
-    
+
     display_name = getattr(target_user, "name", None) or getattr(target_user, "username", None)
-    
-    if profile:
-        profile_data = {
-            "display_name": profile.display_name or display_name,
-            "bio": profile.bio,
-            "custom_status": profile.custom_status,
-            "avatar_url": profile.avatar_url,
-            "date_of_birth": profile.date_of_birth,
-            "created_at": profile.created_at,
-            "updated_at": profile.updated_at,
-        }
-    else:
-        profile_data = {
-            "display_name": display_name,
-            "bio": None,
-            "custom_status": None,
-            "avatar_url": None,
-            "date_of_birth": None,
-            "created_at": getattr(target_user, "created_at", None),
-            "updated_at": getattr(target_user, "updated_at", None),
-        }
-        
+
+    # Auto-create a profile row if none exists (same as /me/profile behaviour)
+    if profile is None:
+        profile = UserProfile(
+            user_id=target_user.id,
+            display_name=display_name,
+        )
+        db.add(profile)
+        await db.commit()
+        await db.refresh(profile)
+
     return {
         "user_id": str(target_user.id),
         "username": target_user.username,
         "email": target_user.email,
-        **profile_data
+        "display_name": profile.display_name or display_name,
+        "bio": profile.bio,
+        "custom_status": profile.custom_status,
+        "avatar_url": profile.avatar_url,
+        "date_of_birth": profile.date_of_birth,
+        "created_at": profile.created_at,
+        "updated_at": profile.updated_at,
     }
 
 @profile_router.patch("/me/profile", response_model=ProfileResponse)
