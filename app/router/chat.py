@@ -958,7 +958,8 @@ async def get_user_groups(db:DBSession,token:str = Depends(oauth2_scheme)):
             "id": group.id,
             "title": group.name,
             "description": group.description,
-            "avatar": avatar_url,
+            "avatar": group.avatar_url,
+            "avatar_url": group.avatar_url,
             "type": group.type.value,
             "role": role.value,
             "member_count": member_count,
@@ -973,7 +974,7 @@ async def get_user_groups(db:DBSession,token:str = Depends(oauth2_scheme)):
                 is_group=True,
             ),
         }
-        for group, role, message, username, display_name,avatar_url, delete_state, receipt, member_count, unread_count in groups
+        for group, role, message, username, display_name, sender_avatar_url, delete_state, receipt, member_count, unread_count in groups
     ]
 
 

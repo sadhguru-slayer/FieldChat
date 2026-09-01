@@ -10,11 +10,21 @@ router = APIRouter(prefix="/api/attachments", tags=["attachments"])
 upload_limiter = RedisRateLimiter(limit=10, window_seconds=60, key_prefix="upload")
 
 @router.post("/upload", dependencies=[Depends(upload_limiter)])
-def upload_file(file: UploadFile = File(...), storage_service: StorageService = Depends()):
+def upload_file(
+    file: UploadFile = File(...),
+    entity_id: str | None = None,
+    custom_filename: str | None = None,
+    storage_service: StorageService = Depends(),
+):
     try:
-        # Generate a unique filename using UUID
+        # Generate a unique filename or use entity_id/custom_filename if specified
         extension = file.filename.split(".")[-1] if "." in file.filename else ""
-        unique_filename = f"{uuid.uuid4()}.{extension}" if extension else str(uuid.uuid4())
+        if custom_filename:
+            unique_filename = custom_filename
+        elif entity_id:
+            unique_filename = f"{entity_id}.{extension}" if extension else str(entity_id)
+        else:
+            unique_filename = f"{uuid.uuid4()}.{extension}" if extension else str(uuid.uuid4())
         
         # Ensure file stream starts at position 0
         if hasattr(file.file, "seek"):
