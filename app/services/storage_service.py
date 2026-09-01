@@ -33,33 +33,34 @@ class StorageService:
         try:
             # Check if bucket exists
             self.s3.head_bucket(Bucket=bucket_name)
-            print(f"[StorageService] Bucket '{bucket_name}' already exists.", flush=True)
+            print(f"[StorageService] Bucket '{bucket_name}' exists.", flush=True)
         except Exception:
             try:
                 # Attempt to create bucket if it doesn't exist
                 print(f"[StorageService] Attempting to create bucket: '{bucket_name}'", flush=True)
                 self.s3.create_bucket(Bucket=bucket_name)
                 print(f"[StorageService] Successfully created bucket '{bucket_name}'", flush=True)
-                
-                # Configure a public read-only policy for this bucket
-                # (Supported by MinIO, but will fail/be ignored in OCI where bucket policies are managed in IAM)
-                policy = {
-                    "Version": "2012-10-17",
-                    "Statement": [
-                        {
-                            "Sid": "PublicReadGetObject",
-                            "Effect": "Allow",
-                            "Principal": "*",
-                            "Action": ["s3:GetObject"],
-                            "Resource": [f"arn:aws:s3:::{bucket_name}/*"]
-                        }
-                    ]
-                }
-                self.s3.put_bucket_policy(Bucket=bucket_name, Policy=json.dumps(policy))
-                print(f"[StorageService] Successfully set public read policy on bucket '{bucket_name}'", flush=True)
             except Exception as e:
-                print(f"[StorageService Warning] Could not auto-initialize bucket/policy for '{bucket_name}': {e}. "
-                      "Ensure the bucket has been pre-created and configured with appropriate IAM/read policies.", flush=True)
+                print(f"[StorageService Warning] Could not auto-create bucket '{bucket_name}': {e}", flush=True)
+
+        # Always configure public read-only policy for local MinIO / S3 public access
+        try:
+            policy = {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Sid": "PublicReadGetObject",
+                        "Effect": "Allow",
+                        "Principal": "*",
+                        "Action": ["s3:GetObject"],
+                        "Resource": [f"arn:aws:s3:::{bucket_name}/*"]
+                    }
+                ]
+            }
+            self.s3.put_bucket_policy(Bucket=bucket_name, Policy=json.dumps(policy))
+            print(f"[StorageService] Successfully set public read policy on bucket '{bucket_name}'", flush=True)
+        except Exception as e:
+            print(f"[StorageService Warning] Could not set bucket policy on '{bucket_name}': {e}", flush=True)
 
     def upload_file(self, file, object_name, content_type=None):
         try:

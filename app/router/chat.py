@@ -826,6 +826,7 @@ async def get_user_dms(
             User.id.label("other_user_id"),
             User.username,
             UserProfile.display_name,
+            UserProfile.avatar_url,
             Message,
             MessageDeleteState,
             MessageReceipt,
@@ -926,6 +927,7 @@ async def get_user_dms(
             "id": conversation.id,
             "name": username,
             "display_name": display_name,
+            "avatar_url": avatar_url,
             "type": conversation.type.value,
             "other_user_id": (
                 str(other_user_id)
@@ -950,6 +952,7 @@ async def get_user_dms(
                 receipt=receipt,
                 current_user_id=token_user.id,
                 is_group=False,
+                display_name=display_name,
             ),
         }
         for (
@@ -957,6 +960,7 @@ async def get_user_dms(
             other_user_id,
             username,
             display_name,
+            avatar_url,
             message,
             delete_state,
             receipt,
