@@ -37,10 +37,10 @@ def get_ws_client_ip(ws: WebSocket) -> str:
     return ws.headers.get("x-real-ip") or (ws.client.host if ws.client else "unknown")
 
 # Rate limit WebSocket connection attempts (e.g. 10 per minute per IP)
-ws_conn_limiter = RedisRateLimiter(limit=20, window_seconds=60, key_prefix="ws_conn")
+ws_conn_limiter = RedisRateLimiter(limit=10, window_seconds=60, key_prefix="ws_conn")
 
 # Rate limit messages sent via WebSocket (e.g. 30 per minute per user)
-ws_msg_limiter = RedisRateLimiter(limit=60, window_seconds=60, key_prefix="ws_msg")
+ws_msg_limiter = RedisRateLimiter(limit=30, window_seconds=60, key_prefix="ws_msg")
 
 @router.websocket("/ws")
 async def web_socket_endpoint(

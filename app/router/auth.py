@@ -19,9 +19,9 @@ from app.core.rate_limit import RedisRateLimiter
 import re
 
 # Rate limit login attempts: max 5 requests per minute per IP
-login_ip_limiter = RedisRateLimiter(limit=5, window_seconds=60, key_prefix="login_ip")
+login_ip_limiter = RedisRateLimiter(limit=20, window_seconds=60, key_prefix="login_ip")
 # Rate limit login attempts: max 5 requests per minute per target username/email
-login_username_limiter = RedisRateLimiter(limit=5, window_seconds=60, key_prefix="login_username")
+login_username_limiter = RedisRateLimiter(limit=60, window_seconds=60, key_prefix="login_username")
 
 
 router = APIRouter(
