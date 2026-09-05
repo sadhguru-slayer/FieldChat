@@ -241,7 +241,7 @@ class MessageService:
         event = add_outbox_event(
             db=self.db,
             event_type=MessageEvent.MESSAGE_CREATED.value,
-            channel = "MESSAGE_EVENT_STREAM",
+            channel = MESSAGE_EVENT_STREAM,
             payload=event_payload.model_dump(mode="json"),
         )
         await self.db.commit()
@@ -454,7 +454,7 @@ class MessageService:
         event = add_outbox_event(
             db=self.db,
             event_type=MessageEvent.MESSAGE_DELETED_FOR_EVERYONE.value,
-            channel = "MESSAGE_EVENT_STREAM",
+            channel = MESSAGE_EVENT_STREAM,
             payload=event_payload.model_dump(mode="json"),
         )
 
@@ -533,7 +533,7 @@ class MessageService:
         event = add_outbox_event(
             db=self.db,
             event_type=MessageEvent.MESSAGE_DELETED_FOR_ME.value,
-            channel = "MESSAGE_EVENT_STREAM",
+            channel = MESSAGE_EVENT_STREAM,
             payload=event_payload.model_dump(mode="json"),
         )
 
