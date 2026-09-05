@@ -16,6 +16,10 @@ docker compose -f docker-compose.prod.yaml up -d --build
 # Run database migrations
 docker compose -f docker-compose.prod.yaml --profile migration run --rm alembic
 
+# Upgrade migrations
+docker compose -f docker-compose.prod.yaml --profile migration run --rm alembic alembic upgrade head
+
+
 # Stop all services
 docker compose -f docker-compose.prod.yaml down
 
