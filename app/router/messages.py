@@ -435,6 +435,7 @@ async def create_message(
             status_code=404,
             detail="Conversation not found",
         )
+    print("[ITS FROM WS]")
 
     result = await message_service.create_message(
         user=token_user,

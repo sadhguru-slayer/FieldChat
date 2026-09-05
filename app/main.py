@@ -19,15 +19,25 @@ from app.redis_client import r
 from app.database import init_db, SessionLocal
 from app.services.cache_management.conversation import conversation_cache
 from app.redis.subscribers import start_redis_listener
+from app.redis.stream_listner import start_redis_stream_listener
 import asyncio
 import os
+from uuid6 import uuid7
+from app.services.outbox_service import outbox_worker
+from app.redis.redis_groups import ensure_message_event_group
 
 from app.database import init_db
 @asynccontextmanager
 async def lifespan(app:FastAPI):
 # Start the conntection and get the db
     await init_db()
+    instance_id = uuid7().hex
 
+    app.state.instance_id = instance_id
+
+    app.state.redis_group = await ensure_message_event_group(
+        instance_id
+    )
     lock = r.lock(
         "lock:sync_conversation_cache",
         timeout = 300,
@@ -49,6 +59,17 @@ async def lifespan(app:FastAPI):
             await lock.release()
     listener_task = asyncio.create_task(start_redis_listener())
     app.state.redis_listener = listener_task
+    
+    outbox_task = asyncio.create_task(outbox_worker())
+    app.state.outbox_worker = outbox_task
+
+    stream_listener_task = asyncio.create_task(
+        start_redis_stream_listener(
+            group_name=app.state.redis_group,
+        )
+    )
+    app.state.redis_stream_listener = stream_listener_task
+
 
     # Add this inside the lifespan context manager:
     from app.services.storage_service import StorageService
@@ -59,7 +80,19 @@ async def lifespan(app:FastAPI):
         print(f"[Startup] Error initializing storage bucket: {e}")
 
     yield
-    listener_task.cancel()
+    for task in (
+        listener_task,
+        outbox_task,
+        stream_listener_task,
+    ):
+        task.cancel()
+
+    await asyncio.gather(
+        listener_task,
+        outbox_task,
+        stream_listener_task,
+        return_exceptions=True,
+    )
 
 is_production = os.getenv("ENVIRONMENT") == "production"
 

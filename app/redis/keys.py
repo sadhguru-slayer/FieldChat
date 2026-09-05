@@ -11,7 +11,13 @@ class RedisKeys:
     @staticmethod
     def user_connections(user_id:str)->str:
         return f"user:{user_id}:connections"
+    @staticmethod
+    def message_event_stream()->str:
+        return "stream:message-events"
 
+    @staticmethod
+    def notification_event_stream()->str:
+        return "stream:notification-events"
     """ 
         ==============
         Conversations

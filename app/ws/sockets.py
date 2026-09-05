@@ -133,6 +133,7 @@ async def web_socket_endpoint(
                 async with SessionLocal() as db:
                     service = MessageService(db)
                     if event == MessageEvent.MESSAGE_CREATED.value:
+                        print("[ITS FROM WS]")
                         await service.create_message(user, conversation_id, content, reply_to_message_id, media_url, media_name)
                     elif event == MessageEvent.MESSAGE_EDITED.value:
                         await service.edit_message(user, conversation_id, message_id, content)

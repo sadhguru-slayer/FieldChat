@@ -11,7 +11,7 @@ from app.ws.manager import manager
 # from app.ws.events import WSMessageEvent
 
 from app.models.chat.messages import Message,MessageDeleteState, MessageEvent, MessageReceipt, MessageType, MessageReaction
-
+from app.services.outbox_service import add_outbox_event
 
 from app.redis_client import r
 from app.redis.keys import RedisKeys
@@ -24,6 +24,7 @@ from app.models.notification import NotificationType
 from app.services.notification_service import notification_service
 from dataclasses import dataclass
 from typing import Generic, Optional, TypeVar
+from app.redis.redis_groups import ensure_message_event_group, MESSAGE_EVENT_STREAM, add_to_stream
 
 T = TypeVar("T")
 
@@ -190,10 +191,9 @@ class MessageService:
             media_url=media_url,
             media_name=media_name,
         )
-
         self.db.add(db_message)
-        await self.db.commit()
-        await self.db.refresh(db_message)
+
+        await self.db.flush()
 
         reply_preview = None
 
@@ -238,11 +238,13 @@ class MessageService:
             media_name=db_message.media_name,
         )
 
-        await r.publish(
-            RedisKeys.conversation_key(str(conversation_id)),
-            event_payload.model_dump_json(),
+        event = add_outbox_event(
+            db=self.db,
+            event_type=MessageEvent.MESSAGE_CREATED.value,
+            channel = "MESSAGE_EVENT_STREAM",
+            payload=event_payload.model_dump(mode="json"),
         )
-
+        await self.db.commit()
         try:
             stmt = select(ConversationParticipant.user_id).where(
                 ConversationParticipant.conversation_id == UUID(str(conversation_id)),
@@ -333,8 +335,7 @@ class MessageService:
         message.message = content.strip()
         message.edited_at = datetime.now(timezone.utc)
 
-        await self.db.commit()
-        await self.db.refresh(message)
+        await self.db.flush()
 
         event_payload = self._build_event(
             MessageEvent.MESSAGE_EDITED,
@@ -347,10 +348,14 @@ class MessageService:
             timestamp=message.timestamp,
             edited_at=message.edited_at,
         )
-        await r.publish(
-            f"conversation:{conversation_id}",
-            event_payload.model_dump_json(),
-        )   
+
+        event = add_outbox_event(
+            db=self.db,
+            event_type=MessageEvent.MESSAGE_EDITED.value,
+            channel=MESSAGE_EVENT_STREAM,
+            payload=event_payload.model_dump(mode="json"),
+        )
+        await self.db.commit()
 
         return ServiceResult(
             success=True,
@@ -431,8 +436,7 @@ class MessageService:
             message.media_url = None
             message.media_name = None
 
-        await self.db.commit()
-        await self.db.refresh(message)
+        await self.db.flush()
 
         event_payload = self._build_event(
             MessageEvent.MESSAGE_DELETED_FOR_EVERYONE,
@@ -443,10 +447,18 @@ class MessageService:
             timestamp=message.timestamp,
         )
 
-        await r.publish(
-            RedisKeys.conversation_key(str(conversation_id)),
-            event_payload.model_dump_json(),
+        # await r.publish(
+        #     RedisKeys.conversation_key(str(conversation_id)),
+        #     event_payload.model_dump_json(),
+        # )
+        event = add_outbox_event(
+            db=self.db,
+            event_type=MessageEvent.MESSAGE_DELETED_FOR_EVERYONE.value,
+            channel = "MESSAGE_EVENT_STREAM",
+            payload=event_payload.model_dump(mode="json"),
         )
+
+        await self.db.commit()
 
         return ServiceResult(
             success=True,
@@ -509,7 +521,7 @@ class MessageService:
         )
 
         self.db.add(delete_state)
-        await self.db.commit()
+        await self.db.flush()
 
         event_payload = self._build_event(
             MessageEvent.MESSAGE_DELETED_FOR_ME,
@@ -518,10 +530,19 @@ class MessageService:
             user_id=user.id,
         )
 
-        await r.publish(
-            f"user:{user.id}",
-            event_payload.model_dump_json(),
+        event = add_outbox_event(
+            db=self.db,
+            event_type=MessageEvent.MESSAGE_DELETED_FOR_ME.value,
+            channel = "MESSAGE_EVENT_STREAM",
+            payload=event_payload.model_dump(mode="json"),
         )
+
+        # await r.publish(
+        #     f"user:{user.id}",
+        #     event_payload.model_dump_json(),
+        # )
+        await self.db.commit()
+
 
         return ServiceResult(
             success=True,
@@ -1010,15 +1031,14 @@ class MessageService:
                     media_url=db_message.public_media_url,
                     media_name=db_message.media_name,
                 )
-                created_events.append((target_id, event_payload))
+                add_outbox_event(
+                    db=self.db,
+                    event_type=MessageEvent.MESSAGE_CREATED.value,
+                    channel=MESSAGE_EVENT_STREAM,
+                    payload=event_payload.model_dump(mode="json"),
+                )
 
         await self.db.commit()
-
-        for target_id, payload in created_events:
-            await r.publish(
-                RedisKeys.conversation_key(str(target_id)),
-                payload.model_dump_json(),
-            )
 
         return ServiceResult(success=True, data={"forwarded_count": len(created_events)})
 
@@ -1079,7 +1099,12 @@ class MessageService:
                     message="Deleted for everyone",
                     timestamp=msg.timestamp,
                 )
-                events_to_publish.append((RedisKeys.conversation_key(str(conversation_id)), event_payload))
+                event = add_outbox_event(
+                    db=self.db,
+                    event_type=MessageEvent.MESSAGE_DELETED_FOR_EVERYONE.value,
+                    channel=MESSAGE_EVENT_STREAM,
+                    payload=event_payload.model_dump(mode="json"),
+                )
 
             await self.db.commit()
 
@@ -1103,12 +1128,14 @@ class MessageService:
                     conversation_id,
                     user_id=user.id,
                 )
-                events_to_publish.append((f"user:{user.id}", event_payload))
+                add_outbox_event(
+                    db=self.db,
+                    event_type=MessageEvent.MESSAGE_DELETED_FOR_ME.value,
+                    channel=MESSAGE_EVENT_STREAM,
+                    payload=event_payload.model_dump(mode="json"),
+                )
 
             await self.db.commit()
-
-        for channel, payload in events_to_publish:
-            await r.publish(channel, payload.model_dump_json())
 
         return ServiceResult(success=True, data={"deleted_count": len(events_to_publish)})
 
