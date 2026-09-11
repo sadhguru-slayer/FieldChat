@@ -17,7 +17,6 @@ docker compose -f docker-compose.prod.yaml up -d --build
 docker compose -f docker-compose.prod.yaml --profile migration run --rm alembic
 
 
-
 # Stop all services
 docker compose -f docker-compose.prod.yaml down
 

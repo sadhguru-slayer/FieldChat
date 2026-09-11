@@ -413,6 +413,7 @@ async def create_message(
     reply_to_message_id: str | None = None,
     media_url: str | None = None,
     media_name: str | None = None,
+    client_message_id: str | None = None,
     db: DBSession = None,
     token: str = Depends(oauth2_scheme),
 ):
@@ -444,6 +445,7 @@ async def create_message(
         reply_to_message_id=reply_uuid,
         media_url=media_url,
         media_name=media_name,
+        client_message_id=client_message_id,
     )
 
     if not result.success:

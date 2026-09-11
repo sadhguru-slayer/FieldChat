@@ -19,6 +19,7 @@ class MessageEventPayload(BaseModel):
     old_reaction: str | None = None
     media_url: str | None = None
     media_name: str | None = None
+    client_message_id: str | None = None
 
 
 from uuid import UUID

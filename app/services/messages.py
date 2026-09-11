@@ -57,6 +57,7 @@ class MessageService:
     old_reaction=None,
         media_url=None,
         media_name=None,
+        client_message_id=None,
     ):
         return MessageEventPayload(
             event=event,
@@ -82,6 +83,7 @@ class MessageService:
         old_reaction=old_reaction,
             media_url=media_url,
             media_name=media_name,
+            client_message_id=client_message_id,
         )
 
     async def _get_reply_preview(self, message_id, user_id):
@@ -142,6 +144,7 @@ class MessageService:
         reply_to_message_id=None,
         media_url=None,
         media_name=None,
+        client_message_id=None,
     ):
         if not await conversation_cache.is_member(
             str(conversation_id),
@@ -236,6 +239,7 @@ class MessageService:
             reply_to=reply_preview,
             media_url=db_message.public_media_url,
             media_name=db_message.media_name,
+            client_message_id=client_message_id,
         )
 
         event = add_outbox_event(
