@@ -166,6 +166,13 @@ class MessageService:
                 error="EMPTY_MESSAGE",
             )
 
+        if client_message_id:
+            redis_dedup_key = f"client_msg:{user.id}:{client_message_id}"
+            is_new = await r.set(redis_dedup_key, "1", nx=True, ex=120)
+            if not is_new:
+                print(f"[DEDUP] Duplicate message submission ignored for client_message_id={client_message_id}", flush=True)
+                return ServiceResult(success=True, data=None)
+
         reply_to = None
 
         if reply_to_message_id:
