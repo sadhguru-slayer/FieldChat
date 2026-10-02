@@ -6,8 +6,8 @@ from app.core.rate_limit import RedisRateLimiter
 
 router = APIRouter(prefix="/api/attachments", tags=["attachments"])
 
-# Rate limit uploads to 10 requests per minute
-upload_limiter = RedisRateLimiter(limit=10, window_seconds=60, key_prefix="upload")
+# Rate limit uploads (allow batch uploads of up to 10 files)
+upload_limiter = RedisRateLimiter(limit=40, window_seconds=60, key_prefix="upload")
 
 @router.post("/upload", dependencies=[Depends(upload_limiter)])
 def upload_file(

@@ -20,6 +20,13 @@ from app.schema.chat.message import MessageEventPayload
 
 
 from uuid import UUID
+from sqlalchemy.orm import aliased
+import html
+import re
+import json
+import asyncio
+import urllib.parse
+import urllib.request
 
 async def broadcast_system_message(conversation_id, db_message: Message, sender_username: str):
     event_payload = MessageEventPayload(
@@ -1504,6 +1511,111 @@ async def get_common_groups(
         }
         for g in groups
     ]
+
+
+def _fetch_link_preview_sync(target_url: str):
+    parsed = urllib.parse.urlparse(target_url)
+    if not parsed.scheme or parsed.scheme not in ("http", "https"):
+        return {"success": False}
+    
+    domain = parsed.hostname or ""
+    if domain.startswith("www."):
+        domain = domain[4:]
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 FieldChat/1.0",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    
+    req = urllib.request.Request(target_url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=3.5) as response:
+            content_type = response.headers.get("Content-Type", "")
+            if "text/html" not in content_type and "application/xhtml" not in content_type:
+                return {
+                    "success": True,
+                    "url": target_url,
+                    "domain": domain,
+                    "title": target_url.split("/")[-1] or domain,
+                    "description": "",
+                    "image": target_url if content_type.startswith("image/") else None,
+                    "favicon": f"https://www.google.com/s2/favicons?domain={domain}&sz=64"
+                }
+            
+            raw_html = response.read(65536).decode("utf-8", errors="ignore")
+    except Exception:
+        return {"success": False}
+
+    # Extract title
+    title = None
+    og_title_match = (
+        re.search(r'<meta[^>]+(?:property|name)=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']', raw_html, re.IGNORECASE) or
+        re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\']og:title["\']', raw_html, re.IGNORECASE)
+    )
+    if og_title_match:
+        title = html.unescape(og_title_match.group(1).strip())
+    else:
+        title_match = re.search(r'<title[^>]*>(.*?)</title>', raw_html, re.IGNORECASE | re.DOTALL)
+        if title_match:
+            title = html.unescape(title_match.group(1).strip())
+
+    # Extract description
+    description = None
+    og_desc_match = (
+        re.search(r'<meta[^>]+(?:property|name)=["\']og:description["\'][^>]+content=["\']([^"\']+)["\']', raw_html, re.IGNORECASE) or
+        re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\']og:description["\']', raw_html, re.IGNORECASE) or
+        re.search(r'<meta[^>]+(?:property|name)=["\']description["\'][^>]+content=["\']([^"\']+)["\']', raw_html, re.IGNORECASE) or
+        re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\']description["\']', raw_html, re.IGNORECASE)
+    )
+    if og_desc_match:
+        description = html.unescape(og_desc_match.group(1).strip())
+
+    # Extract image
+    image = None
+    og_img_match = (
+        re.search(r'<meta[^>]+(?:property|name)=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', raw_html, re.IGNORECASE) or
+        re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\']og:image["\']', raw_html, re.IGNORECASE)
+    )
+    if og_img_match:
+        img_raw = og_img_match.group(1).strip()
+        image = urllib.parse.urljoin(target_url, img_raw)
+
+    favicon = f"https://www.google.com/s2/favicons?domain={domain}&sz=64"
+
+    if not title and not description and not image:
+        return {"success": False}
+
+    return {
+        "success": True,
+        "url": target_url,
+        "domain": domain,
+        "title": title or domain,
+        "description": description or "",
+        "image": image,
+        "favicon": favicon
+    }
+
+
+@router.get("/link-preview")
+async def get_link_preview(url: str):
+    if not url or not (url.startswith("http://") or url.startswith("https://")):
+        return {"success": False}
+    cache_key = f"link_preview:{url}"
+    try:
+        cached = await r.get(cache_key)
+        if cached:
+            return json.loads(cached)
+    except Exception:
+        pass
+
+    data = await asyncio.to_thread(_fetch_link_preview_sync, url)
+    if data.get("success"):
+        try:
+            await r.setex(cache_key, 86400, json.dumps(data))
+        except Exception:
+            pass
+    return data
 
 
 @general_chat_router.get('/get-all-dms')
