@@ -866,6 +866,7 @@ def build_latest_message(
         ),
         "media_url": message.public_media_url if not message.is_deleted_global and not delete_state else None,
         "media_name": message.media_name if not message.is_deleted_global and not delete_state else None,
+        "is_gif": message.is_gif if not message.is_deleted_global and not delete_state else False,
     }
 
 

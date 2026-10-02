@@ -19,6 +19,7 @@ class MessageEventPayload(BaseModel):
     old_reaction: str | None = None
     media_url: str | None = None
     media_name: str | None = None
+    is_gif: bool = False
     client_message_id: str | None = None
 
 

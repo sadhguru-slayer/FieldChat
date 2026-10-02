@@ -54,9 +54,10 @@ class MessageService:
         edited_at=None,
         reply_to=None,
         reaction=None,
-    old_reaction=None,
+        old_reaction=None,
         media_url=None,
         media_name=None,
+        is_gif=False,
         client_message_id=None,
     ):
         return MessageEventPayload(
@@ -80,9 +81,10 @@ class MessageService:
             ),
             reply_to=reply_to,
             reaction=reaction,
-        old_reaction=old_reaction,
+            old_reaction=old_reaction,
             media_url=media_url,
             media_name=media_name,
+            is_gif=bool(is_gif),
             client_message_id=client_message_id,
         )
 
@@ -145,6 +147,7 @@ class MessageService:
         media_url=None,
         media_name=None,
         client_message_id=None,
+        is_gif=False,
     ):
         if not await conversation_cache.is_member(
             str(conversation_id),
@@ -193,6 +196,8 @@ class MessageService:
                     error="REPLY_MESSAGE_NOT_FOUND",
                 )
 
+        is_gif_flag = bool(is_gif or (media_name and media_name.startswith("[GIF]")))
+
         db_message = Message(
             conversation_id=conversation_id,
             sender_id=user.id,
@@ -200,6 +205,7 @@ class MessageService:
             reply_to_message_id=reply_to.id if reply_to else None,
             media_url=media_url,
             media_name=media_name,
+            is_gif=is_gif_flag,
         )
         self.db.add(db_message)
 
@@ -246,6 +252,7 @@ class MessageService:
             reply_to=reply_preview,
             media_url=db_message.public_media_url,
             media_name=db_message.media_name,
+            is_gif=db_message.is_gif,
             client_message_id=client_message_id,
         )
 
@@ -265,8 +272,11 @@ class MessageService:
             
             notif_body = content
             if not notif_body and db_message.media_url:
-                is_image = any(db_message.media_name.lower().endswith(ext) for ext in [".jpeg", ".jpg", ".gif", ".png", ".webp", ".svg"]) if db_message.media_name else False
-                notif_body = "📷 Photo" if is_image else "📁 Attachment"
+                if db_message.is_gif:
+                    notif_body = "👾 GIF"
+                else:
+                    is_image = any(db_message.media_name.lower().endswith(ext) for ext in [".jpeg", ".jpg", ".gif", ".png", ".webp", ".svg"]) if db_message.media_name else False
+                    notif_body = "📷 Photo" if is_image else "📁 Attachment"
 
             for member_id in other_members:
                 # Do not send notifications to users actively viewing this conversation

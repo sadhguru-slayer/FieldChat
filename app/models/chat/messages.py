@@ -59,6 +59,7 @@ class Message(UUIDMixin,Base):
 
     media_url : Mapped[str | None] = mapped_column(String, nullable=True)
     media_name : Mapped[str | None] = mapped_column(String, nullable=True)
+    is_gif: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     message: Mapped[str] = mapped_column(Text)
     edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

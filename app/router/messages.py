@@ -346,6 +346,7 @@ async def get_messages(
             "reactions": list(reaction_map.values()),
             "media_url": message.public_media_url,
             "media_name": message.media_name,
+            "is_gif": message.is_gif or False,
         }
 
         events.append(
@@ -413,6 +414,7 @@ async def create_message(
     reply_to_message_id: str | None = None,
     media_url: str | None = None,
     media_name: str | None = None,
+    is_gif: bool = False,
     client_message_id: str | None = None,
     db: DBSession = None,
     token: str = Depends(oauth2_scheme),
@@ -446,6 +448,7 @@ async def create_message(
         media_url=media_url,
         media_name=media_name,
         client_message_id=client_message_id,
+        is_gif=is_gif,
     )
 
     if not result.success:

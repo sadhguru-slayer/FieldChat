@@ -112,6 +112,7 @@ async def web_socket_endpoint(
             reply_to_message_id = data.get("reply_to_message_id") or None
             media_url = data.get("media_url") or None
             media_name = data.get("media_name") or None
+            is_gif = bool(data.get("is_gif") or data.get("isGif"))
 
             client_message_id = data.get("client_message_id") or data.get("clientMessageId") or data.get("tempId") or None
 
@@ -136,7 +137,7 @@ async def web_socket_endpoint(
                     service = MessageService(db)
                     if event == MessageEvent.MESSAGE_CREATED.value:
                         print("[ITS FROM WS]")
-                        await service.create_message(user, conversation_id, content, reply_to_message_id, media_url, media_name, client_message_id)
+                        await service.create_message(user, conversation_id, content, reply_to_message_id, media_url, media_name, client_message_id, is_gif=is_gif)
                     elif event == MessageEvent.MESSAGE_EDITED.value:
                         await service.edit_message(user, conversation_id, message_id, content)
                     elif event == MessageEvent.MESSAGE_DELETED_FOR_EVERYONE.value:
