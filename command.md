@@ -16,6 +16,13 @@ docker compose -f docker-compose.prod.yaml up -d --build
 # Run database migrations
 docker compose -f docker-compose.prod.yaml --profile migration run --rm alembic
 
+docker compose -f docker-compose.prod.yaml build alembic
+<!-- Appl migrations -->
+docker compose -f docker-compose.prod.yaml --profile migration run --rm alembic alembic revision --autogenerate -m "add is_gif to messages"
+<!-- Upgrade -->
+docker compose -f docker-compose.prod.yaml --profile migration run --rm alembic alembic upgrade head
+
+
 
 # Stop all services
 docker compose -f docker-compose.prod.yaml down
