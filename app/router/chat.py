@@ -1468,8 +1468,47 @@ async def get_participant_details(participant_id:str,group_id:str,db:DBSession):
     return participant
 
 
+@router.get("/common-groups/{target_user_id}")
+async def get_common_groups(
+    target_user_id: str,
+    db: DBSession,
+    token: str = Depends(oauth2_scheme),
+):
+    token_user = await user_service.get_current_user(db, token)
+    try:
+        target_uuid = UUID(target_user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid target user ID")
+
+    p1 = aliased(ConversationParticipant)
+    p2 = aliased(ConversationParticipant)
+
+    stmt = (
+        select(Conversation)
+        .join(p1, p1.conversation_id == Conversation.id)
+        .join(p2, p2.conversation_id == Conversation.id)
+        .where(
+            Conversation.type == ConversationType.GROUP,
+            p1.user_id == token_user.id,
+            p2.user_id == target_uuid,
+        )
+    )
+    result = await db.execute(stmt)
+    groups = result.scalars().all()
+    return [
+        {
+            "id": str(g.id),
+            "name": g.name or "Group",
+            "avatar_url": g.avatar_url,
+            "description": g.description,
+        }
+        for g in groups
+    ]
+
+
 @general_chat_router.get('/get-all-dms')
 async def get_all_dms(db:DBSession):
     results = await db.execute(select(Conversation).where(Conversation.type == ConversationType.PERSONAL))
     conversations = results.scalars().all()
     return conversations
+
